@@ -1,0 +1,22 @@
+// =============================================================================
+// Sistema Elo Saúde — schema central (PostgreSQL / Supabase)
+// -----------------------------------------------------------------------------
+// Convenções:
+//  - Modelos em PascalCase (pt-BR); tabelas/colunas em snake_case via @@map/@map.
+//  - Toda tabela com dados de cliente carrega tenant_id e é protegida por RLS
+//    (prisma/sql/001_rls_constraints_auditoria.sql).
+//  - Campos *Cifrado (Bytes): AES-256-GCM em nível de aplicação, chave por tenant
+//    (envelope encryption via KMS/Vault). Nunca trafegam em claro para o banco.
+//  - Campos *Hash: HMAC-SHA256 (blind index) para busca/unicidade sem expor o dado.
+//  - Dinheiro: Decimal(12,2). Datas/horas: timestamptz. IDs: UUID v7.
+//  - Registros clínicos e financeiros não são apagados: usam status/estorno/retificação.
+// =============================================================================
+
+generator client {
+  provider = "prisma-client"
+  output   = "../../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}

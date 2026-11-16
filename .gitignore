@@ -1,0 +1,12 @@
+node_modules/
+dist/
+.next/
+.turbo/
+coverage/
+.env
+.env.*
+!.env.example
+packages/database/src/generated/
+# Flutter
+apps/mobile/.dart_tool/
+apps/mobile/build/

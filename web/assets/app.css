@@ -1,0 +1,50 @@
+/* Tokens base — a cor da marca é sobrescrita em runtime pelo branding do tenant (white label). */
+:root {
+  --marca: #0f766e;
+  --marca-clara: #ecfdf5;
+  --tinta: #0f172a;
+  --tinta-2: #475569;
+  --superficie: #f6f8fa;
+  color-scheme: light;
+}
+
+html { -webkit-text-size-adjust: 100%; }
+body {
+  margin: 0;
+  background: var(--superficie);
+  color: var(--tinta);
+  font-family: 'Inter', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Evita "flash" de HTML sem estilo enquanto o Tailwind (CDN) compila as classes. */
+body:not(.pronto) #app { visibility: hidden; }
+
+.rolagem-fina::-webkit-scrollbar { width: 8px; height: 8px; }
+.rolagem-fina::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 8px; }
+
+/* Barras dos gráficos (marcas finas, cantos de 4px só na ponta de dado, 2px de respiro). */
+.grafico-barras { display: flex; align-items: flex-end; gap: 2px; height: 100%; }
+.grafico-barras .barra { width: 60%; min-width: 6px; max-width: 44px; background: var(--marca); border-radius: 4px 4px 0 0; transition: filter .15s; }
+.grafico-barras .coluna { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: flex-end; height: 100%; cursor: default; }
+.grafico-barras .coluna:hover .barra, .barra-h:hover { filter: brightness(1.18); }
+.barra-h { background: var(--marca); border-radius: 0 4px 4px 0; height: 10px; }
+.tooltip-grafico {
+  position: fixed; z-index: 70; pointer-events: none; background: #0f172a; color: #fff;
+  font-size: 12px; line-height: 1.4; padding: 6px 10px; border-radius: 8px; box-shadow: 0 6px 16px rgb(0 0 0 / .2);
+  white-space: nowrap;
+}
+
+/* Carteirinha digital */
+.carteirinha {
+  background: radial-gradient(120% 120% at 100% 0%, color-mix(in oklab, var(--marca) 55%, white) 0%, var(--marca) 45%, color-mix(in oklab, var(--marca) 70%, black) 100%);
+}
+.anel-tempo { transition: stroke-dashoffset 1s linear; }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: .01ms !important; transition-duration: .01ms !important; }
+}
+
+@media print {
+  .nao-imprimir { display: none !important; }
+}

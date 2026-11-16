@@ -1,0 +1,233 @@
+// =============================================================================
+// Comunicação (WhatsApp Cloud API / FCM / e-mail), Avaliações e Assistente de IA
+// =============================================================================
+
+enum CanalComunicacao {
+  WHATSAPP
+  PUSH
+  EMAIL
+  SMS
+}
+
+enum StatusTemplate {
+  RASCUNHO
+  EM_ANALISE
+  APROVADO
+  REJEITADO
+  PAUSADO
+}
+
+/// Templates de mensagem. Para WhatsApp, espelha o template aprovado na Meta.
+model TemplateMensagem {
+  id           String           @id @default(uuid(7)) @db.Uuid
+  tenantId     String           @map("tenant_id") @db.Uuid
+  /// Ex.: LEMBRETE_CONSULTA_24H, CONFIRMACAO_AGENDAMENTO, FATURA_VENCENDO, PIX_GERADO.
+  codigo       String
+  canal        CanalComunicacao
+  /// Nome do template na Meta (WhatsApp Business).
+  nomeExterno  String?          @map("nome_externo")
+  idioma       String           @default("pt_BR")
+  /// UTILITY | MARKETING | AUTHENTICATION (categoria Meta).
+  categoriaMeta String?         @map("categoria_meta")
+  titulo       String?
+  corpo        String
+  variaveis    String[]
+  status       StatusTemplate   @default(RASCUNHO)
+  criadoEm     DateTime         @default(now()) @map("criado_em") @db.Timestamptz(6)
+  atualizadoEm DateTime         @updatedAt @map("atualizado_em") @db.Timestamptz(6)
+
+  tenant       Tenant        @relation(fields: [tenantId], references: [id])
+  reguaEtapas  ReguaEtapa[]
+  notificacoes Notificacao[]
+
+  @@unique([tenantId, canal, codigo])
+  @@map("templates_mensagem")
+}
+
+enum StatusMensagem {
+  ENFILEIRADA
+  ENVIADA
+  ENTREGUE
+  LIDA
+  RESPONDIDA
+  FALHOU
+  CANCELADA
+}
+
+/// Outbox de mensagens. Respostas do WhatsApp ("1 - Confirmar") atualizam o agendamento.
+model Notificacao {
+  id                String           @id @default(uuid(7)) @db.Uuid
+  tenantId          String           @map("tenant_id") @db.Uuid
+  canal             CanalComunicacao
+  templateId        String?          @map("template_id") @db.Uuid
+  usuarioId         String?          @map("usuario_id") @db.Uuid
+  pessoaId          String?          @map("pessoa_id") @db.Uuid
+  /// Telefone E.164, e-mail ou token FCM.
+  destino           String
+  titulo            String?
+  conteudo          String?
+  variaveis         Json?
+  status            StatusMensagem   @default(ENFILEIRADA)
+  idExternoProvedor String?          @map("id_externo_provedor")
+  erro              String?
+  agendadaPara      DateTime?        @map("agendada_para") @db.Timestamptz(6)
+  enviadaEm         DateTime?        @map("enviada_em") @db.Timestamptz(6)
+  entregueEm        DateTime?        @map("entregue_em") @db.Timestamptz(6)
+  lidaEm            DateTime?        @map("lida_em") @db.Timestamptz(6)
+  respostaTexto     String?          @map("resposta_texto")
+  agendamentoId     String?          @map("agendamento_id") @db.Uuid
+  faturaId          String?          @map("fatura_id") @db.Uuid
+  reguaEtapaId      String?          @map("regua_etapa_id") @db.Uuid
+  criadoEm          DateTime         @default(now()) @map("criado_em") @db.Timestamptz(6)
+
+  tenant      Tenant            @relation(fields: [tenantId], references: [id])
+  template    TemplateMensagem? @relation(fields: [templateId], references: [id])
+  usuario     Usuario?          @relation(fields: [usuarioId], references: [id])
+  pessoa      Pessoa?           @relation(fields: [pessoaId], references: [id])
+  agendamento Agendamento?      @relation(fields: [agendamentoId], references: [id])
+  fatura      Fatura?           @relation(fields: [faturaId], references: [id])
+  reguaEtapa  ReguaEtapa?       @relation(fields: [reguaEtapaId], references: [id])
+
+  @@index([tenantId, status, agendadaPara])
+  @@index([idExternoProvedor])
+  @@index([agendamentoId])
+  @@map("notificacoes")
+}
+
+enum StatusModeracao {
+  PENDENTE
+  PUBLICADA
+  OCULTA
+  REMOVIDA
+}
+
+/// Avaliação 1–5 estrelas (CHECK no SQL). Só pode avaliar quem foi atendido:
+/// vinculada a um atendimento ou a uma transação de benefício (uma avaliação por uso).
+model Avaliacao {
+  id                   String          @id @default(uuid(7)) @db.Uuid
+  tenantId             String          @map("tenant_id") @db.Uuid
+  pessoaId             String          @map("pessoa_id") @db.Uuid
+  atendimentoId        String?         @unique @map("atendimento_id") @db.Uuid
+  transacaoBeneficioId String?         @unique @map("transacao_beneficio_id") @db.Uuid
+  profissionalId       String?         @map("profissional_id") @db.Uuid
+  estabelecimentoId    String?         @map("estabelecimento_id") @db.Uuid
+  nota                 Int             @db.SmallInt
+  comentario           String?
+  anonima              Boolean         @default(false)
+  status               StatusModeracao @default(PENDENTE)
+  motivoModeracao      String?         @map("motivo_moderacao")
+  resposta             String?
+  respondidaEm         DateTime?       @map("respondida_em") @db.Timestamptz(6)
+  criadoEm             DateTime        @default(now()) @map("criado_em") @db.Timestamptz(6)
+
+  tenant             Tenant              @relation(fields: [tenantId], references: [id])
+  pessoa             Pessoa              @relation(fields: [pessoaId], references: [id])
+  atendimento        Atendimento?        @relation(fields: [atendimentoId], references: [id])
+  transacaoBeneficio TransacaoBeneficio? @relation(fields: [transacaoBeneficioId], references: [id])
+  profissional       Profissional?       @relation(fields: [profissionalId], references: [id])
+  estabelecimento    Estabelecimento?    @relation(fields: [estabelecimentoId], references: [id])
+
+  @@index([tenantId, profissionalId, status])
+  @@index([tenantId, estabelecimentoId, status])
+  @@map("avaliacoes")
+}
+
+// -----------------------------------------------------------------------------
+// Assistente de IA — apoio, nunca diagnóstico. Sinais de alarme encerram o fluxo
+// e direcionam para emergência (alertaEmergencia).
+// -----------------------------------------------------------------------------
+
+enum CanalIa {
+  APP
+  WHATSAPP
+  PAINEL_RECEPCAO
+  WEB
+}
+
+enum FinalidadeIa {
+  DUVIDAS_GERAIS
+  ORIENTACAO_ESPECIALIDADE
+  AGENDAMENTO
+  EXPLICACAO_LAUDO
+  TRIAGEM_RECEPCAO
+}
+
+enum StatusConversaIa {
+  ATIVA
+  ENCERRADA
+  ESCALADA_HUMANO
+}
+
+enum PapelMensagemIa {
+  USUARIO
+  ASSISTENTE
+  FERRAMENTA
+  SISTEMA
+}
+
+model ConversaIa {
+  id                      String              @id @default(uuid(7)) @db.Uuid
+  tenantId                String              @map("tenant_id") @db.Uuid
+  canal                   CanalIa
+  finalidade              FinalidadeIa
+  status                  StatusConversaIa    @default(ATIVA)
+  pessoaId                String?             @map("pessoa_id") @db.Uuid
+  usuarioId               String?             @map("usuario_id") @db.Uuid
+  especialidadeSugeridaId String?             @map("especialidade_sugerida_id") @db.Uuid
+  urgenciaSugerida        ClassificacaoRisco? @map("urgencia_sugerida")
+  alertaEmergencia        Boolean             @default(false) @map("alerta_emergencia")
+  agendamentoId           String?             @map("agendamento_id") @db.Uuid
+  resultadoExameId        String?             @map("resultado_exame_id") @db.Uuid
+  iniciadaEm              DateTime            @default(now()) @map("iniciada_em") @db.Timestamptz(6)
+  encerradaEm             DateTime?           @map("encerrada_em") @db.Timestamptz(6)
+
+  tenant                Tenant          @relation(fields: [tenantId], references: [id])
+  pessoa                Pessoa?         @relation(fields: [pessoaId], references: [id])
+  usuario               Usuario?        @relation(fields: [usuarioId], references: [id])
+  especialidadeSugerida Especialidade?  @relation(fields: [especialidadeSugeridaId], references: [id])
+  agendamento           Agendamento?    @relation(fields: [agendamentoId], references: [id])
+  resultadoExame        ResultadoExame? @relation(fields: [resultadoExameId], references: [id])
+  mensagens             MensagemIa[]
+  triagens              Triagem[]
+
+  @@index([tenantId, pessoaId, iniciadaEm])
+  @@map("conversas_ia")
+}
+
+model MensagemIa {
+  id                String          @id @default(uuid(7)) @db.Uuid
+  tenantId          String          @map("tenant_id") @db.Uuid
+  conversaId        String          @map("conversa_id") @db.Uuid
+  papel             PapelMensagemIa
+  /// Relatos de sintomas são dado de saúde: cifrado como o PEP.
+  conteudoCifrado   Bytes           @map("conteudo_cifrado")
+  provedor          String?
+  modelo            String?
+  tokensEntrada     Int?            @map("tokens_entrada")
+  tokensSaida       Int?            @map("tokens_saida")
+  chamadaFerramenta Json?           @map("chamada_ferramenta")
+  criadoEm          DateTime        @default(now()) @map("criado_em") @db.Timestamptz(6)
+
+  tenant   Tenant     @relation(fields: [tenantId], references: [id])
+  conversa ConversaIa @relation(fields: [conversaId], references: [id], onDelete: Cascade)
+
+  @@index([conversaId, criadoEm])
+  @@map("mensagens_ia")
+}
+
+/// FAQ/regras do tenant para RAG (pgvector). Dimensão ajustável ao modelo de embedding.
+model BaseConhecimentoIa {
+  id           String                       @id @default(uuid(7)) @db.Uuid
+  tenantId     String                       @map("tenant_id") @db.Uuid
+  titulo       String
+  conteudo     String
+  categoria    String?
+  embedding    Unsupported("vector(1536)")?
+  ativo        Boolean                      @default(true)
+  atualizadoEm DateTime                     @updatedAt @map("atualizado_em") @db.Timestamptz(6)
+
+  tenant Tenant @relation(fields: [tenantId], references: [id])
+
+  @@index([tenantId, ativo])
+  @@map("base_conhecimento_ia")
+}

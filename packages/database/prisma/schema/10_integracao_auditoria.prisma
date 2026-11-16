@@ -1,0 +1,195 @@
+// =============================================================================
+// Data Gateway (bancos legados dos hospitais) e Trilha de Auditoria
+// =============================================================================
+
+enum DriverBanco {
+  MYSQL
+  POSTGRESQL
+  SQLSERVER
+  ORACLE
+}
+
+enum EntidadeSincronizavel {
+  PESSOA
+  PROFISSIONAL
+  ESTABELECIMENTO
+  ITEM_CATALOGO
+  AGENDAMENTO
+  ATENDIMENTO
+  RESULTADO_EXAME
+}
+
+enum ModoSincronizacao {
+  AGENDADO
+  SOB_DEMANDA
+}
+
+enum StatusExecucao {
+  EM_EXECUCAO
+  SUCESSO
+  SUCESSO_PARCIAL
+  FALHA
+}
+
+/// Conexão com o banco legado (HIS/LIS) do hospital. A senha NUNCA fica aqui:
+/// `segredoRef` aponta para o cofre (Supabase Vault / AWS Secrets Manager).
+model ConexaoLegada {
+  id            String      @id @default(uuid(7)) @db.Uuid
+  tenantId      String      @map("tenant_id") @db.Uuid
+  nome          String
+  driver        DriverBanco
+  host          String
+  porta         Int
+  bancoDados    String      @map("banco_dados")
+  esquema       String?
+  usuario       String
+  segredoRef    String      @map("segredo_ref")
+  ssl           Boolean     @default(true)
+  /// Por padrão o gateway só lê (usuário de banco com SELECT).
+  somenteLeitura Boolean    @default(true) @map("somente_leitura")
+  opcoes        Json?
+  ativa         Boolean     @default(true)
+  ultimoTesteEm DateTime?   @map("ultimo_teste_em") @db.Timestamptz(6)
+  ultimoTesteOk Boolean?    @map("ultimo_teste_ok")
+  criadoEm      DateTime    @default(now()) @map("criado_em") @db.Timestamptz(6)
+  atualizadoEm  DateTime    @updatedAt @map("atualizado_em") @db.Timestamptz(6)
+
+  tenant       Tenant              @relation(fields: [tenantId], references: [id])
+  mapeamentos  MapeamentoLegado[]
+  referencias  ReferenciaExterna[]
+
+  @@map("conexoes_legadas")
+}
+
+/// Mapeamento configurável tabela/consulta legada → entidade do schema central.
+model MapeamentoLegado {
+  id                String                @id @default(uuid(7)) @db.Uuid
+  tenantId          String                @map("tenant_id") @db.Uuid
+  conexaoId         String                @map("conexao_id") @db.Uuid
+  nome              String
+  entidadeDestino   EntidadeSincronizavel @map("entidade_destino")
+  /// Tabela/view de origem OU consulta SELECT parametrizada (validada: somente leitura).
+  origemTabela      String?               @map("origem_tabela")
+  origemConsulta    String?               @map("origem_consulta")
+  chaveOrigem       String                @map("chave_origem")
+  /// Coluna de watermark para carga incremental (ex.: dt_atualizacao).
+  colunaIncremental String?               @map("coluna_incremental")
+  ultimoCursor      String?               @map("ultimo_cursor")
+  /// {"nome":{"origem":"NM_PACIENTE"},"cpf":{"origem":"NR_CPF","transformacao":"somente_digitos"}}
+  camposMapeados    Json                  @map("campos_mapeados")
+  modo              ModoSincronizacao     @default(AGENDADO)
+  cron              String?
+  ativo             Boolean               @default(true)
+  criadoEm          DateTime              @default(now()) @map("criado_em") @db.Timestamptz(6)
+  atualizadoEm      DateTime              @updatedAt @map("atualizado_em") @db.Timestamptz(6)
+
+  tenant    Tenant                  @relation(fields: [tenantId], references: [id])
+  conexao   ConexaoLegada           @relation(fields: [conexaoId], references: [id])
+  execucoes ExecucaoSincronizacao[]
+
+  @@map("mapeamentos_legados")
+}
+
+model ExecucaoSincronizacao {
+  id              String         @id @default(uuid(7)) @db.Uuid
+  tenantId        String         @map("tenant_id") @db.Uuid
+  mapeamentoId    String         @map("mapeamento_id") @db.Uuid
+  status          StatusExecucao @default(EM_EXECUCAO)
+  iniciadaEm      DateTime       @default(now()) @map("iniciada_em") @db.Timestamptz(6)
+  finalizadaEm    DateTime?      @map("finalizada_em") @db.Timestamptz(6)
+  registrosLidos  Int            @default(0) @map("registros_lidos")
+  inseridos       Int            @default(0)
+  atualizados     Int            @default(0)
+  ignorados       Int            @default(0)
+  comErro         Int            @default(0) @map("com_erro")
+  cursorInicial   String?        @map("cursor_inicial")
+  cursorFinal     String?        @map("cursor_final")
+  detalhesErros   Json?          @map("detalhes_erros")
+
+  tenant     Tenant           @relation(fields: [tenantId], references: [id])
+  mapeamento MapeamentoLegado @relation(fields: [mapeamentoId], references: [id])
+
+  @@index([mapeamentoId, iniciadaEm])
+  @@map("execucoes_sincronizacao")
+}
+
+/// De-para de identificadores legado ↔ central (evita duplicar registros a cada carga).
+model ReferenciaExterna {
+  id             String                @id @default(uuid(7)) @db.Uuid
+  tenantId       String                @map("tenant_id") @db.Uuid
+  conexaoId      String                @map("conexao_id") @db.Uuid
+  entidade       EntidadeSincronizavel
+  idExterno      String                @map("id_externo")
+  idInterno      String                @map("id_interno") @db.Uuid
+  /// Hash do registro de origem para detectar mudança sem comparar campo a campo.
+  hashConteudo   String?               @map("hash_conteudo") @db.Char(64)
+  sincronizadoEm DateTime              @default(now()) @map("sincronizado_em") @db.Timestamptz(6)
+
+  tenant  Tenant        @relation(fields: [tenantId], references: [id])
+  conexao ConexaoLegada @relation(fields: [conexaoId], references: [id])
+
+  @@unique([conexaoId, entidade, idExterno])
+  @@index([entidade, idInterno])
+  @@map("referencias_externas")
+}
+
+// -----------------------------------------------------------------------------
+// Auditoria — append-only, com encadeamento de hash (tamper-evident).
+// Sem FKs de propósito: o log sobrevive a qualquer alteração cadastral.
+// UPDATE/DELETE bloqueados por trigger; hash calculado no INSERT (ver SQL).
+// -----------------------------------------------------------------------------
+
+enum AcaoAuditoria {
+  CRIAR
+  LER
+  ATUALIZAR
+  EXCLUIR
+  LOGIN
+  LOGIN_FALHOU
+  LOGOUT
+  EXPORTAR
+  IMPRIMIR
+  ASSINAR
+  APROVAR
+  ESTORNAR
+  /// "Quebra de vidro": acesso ao PEP fora do vínculo assistencial, com justificativa.
+  ACESSO_EMERGENCIA
+}
+
+enum TipoAtor {
+  USUARIO
+  SISTEMA
+  INTEGRACAO
+  IA
+  WEBHOOK
+}
+
+model LogAuditoria {
+  id              BigInt        @id @default(autoincrement())
+  tenantId        String?       @map("tenant_id") @db.Uuid
+  atorTipo        TipoAtor      @map("ator_tipo")
+  usuarioId       String?       @map("usuario_id") @db.Uuid
+  membroId        String?       @map("membro_id") @db.Uuid
+  acao            AcaoAuditoria
+  entidade        String
+  entidadeId      String?       @map("entidade_id")
+  /// Campos sensíveis chegam mascarados/omitidos — nunca CPF ou conteúdo clínico em claro.
+  dadosAntes      Json?         @map("dados_antes")
+  dadosDepois     Json?         @map("dados_depois")
+  camposAlterados String[]      @map("campos_alterados")
+  justificativa   String?
+  ip              String?       @db.Inet
+  userAgent       String?       @map("user_agent")
+  requestId       String?       @map("request_id")
+  rota            String?
+  criadoEm        DateTime      @default(now()) @map("criado_em") @db.Timestamptz(6)
+  hashAnterior    String?       @map("hash_anterior") @db.Char(64)
+  hash            String?       @db.Char(64)
+
+  @@index([tenantId, criadoEm])
+  @@index([tenantId, entidade, entidadeId])
+  @@index([usuarioId, criadoEm])
+  /// Usado pelo trigger de encadeamento para achar o último hash do tenant.
+  @@index([tenantId, id(sort: Desc)])
+  @@map("log_auditoria")
+}

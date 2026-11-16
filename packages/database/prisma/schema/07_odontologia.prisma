@@ -1,0 +1,189 @@
+// =============================================================================
+// Módulo 14 — Portal Odontológico
+// Odontograma em notação FDI (ISO 3950): permanentes 11–48, decíduos 51–85.
+// Modelo orientado a eventos: o estado atual de cada dente/face é o registro
+// mais recente não anulado — preserva o histórico de evolução exigido pelo CFO.
+// =============================================================================
+
+enum FaceDental {
+  MESIAL
+  DISTAL
+  OCLUSAL
+  INCISAL
+  VESTIBULAR
+  LINGUAL
+  PALATINA
+  CERVICAL
+}
+
+enum CondicaoDental {
+  HIGIDO
+  CARIE
+  RESTAURACAO
+  RESTAURACAO_DEFEITUOSA
+  SELANTE
+  FRATURA
+  TRATAMENTO_CANAL
+  LESAO_PERIAPICAL
+  COROA
+  PONTE
+  IMPLANTE
+  PROTESE_REMOVIVEL
+  RAIZ_RESIDUAL
+  EXTRACAO_INDICADA
+  EXTRAIDO
+  AUSENTE
+  INCLUSO
+  MOBILIDADE
+  APARELHO_ORTODONTICO
+}
+
+enum SituacaoRegistroDental {
+  /// Encontrado na avaliação inicial.
+  PREEXISTENTE
+  /// Planejado (aparece em vermelho no odontograma).
+  A_REALIZAR
+  /// Executado (aparece em azul).
+  REALIZADO
+}
+
+model OdontogramaRegistro {
+  id             String                 @id @default(uuid(7)) @db.Uuid
+  tenantId       String                 @map("tenant_id") @db.Uuid
+  prontuarioId   String                 @map("prontuario_id") @db.Uuid
+  pessoaId       String                 @map("pessoa_id") @db.Uuid
+  atendimentoId  String?                @map("atendimento_id") @db.Uuid
+  profissionalId String                 @map("profissional_id") @db.Uuid
+  procedimentoId String?                @map("procedimento_id") @db.Uuid
+  /// Código FDI do dente. Nulo para registros de arcada/região inteira.
+  dente          Int?                   @db.SmallInt
+  faces          FaceDental[]
+  condicao       CondicaoDental
+  situacao       SituacaoRegistroDental
+  observacao     String?
+  registradoEm   DateTime               @default(now()) @map("registrado_em") @db.Timestamptz(6)
+  anuladoEm      DateTime?              @map("anulado_em") @db.Timestamptz(6)
+  motivoAnulacao String?                @map("motivo_anulacao")
+
+  tenant       Tenant              @relation(fields: [tenantId], references: [id])
+  prontuario   Prontuario          @relation(fields: [prontuarioId], references: [id])
+  pessoa       Pessoa              @relation(fields: [pessoaId], references: [id])
+  atendimento  Atendimento?        @relation(fields: [atendimentoId], references: [id])
+  profissional Profissional        @relation(fields: [profissionalId], references: [id])
+  procedimento ProcedimentoOdonto? @relation(fields: [procedimentoId], references: [id])
+
+  @@index([pessoaId, dente, registradoEm])
+  @@map("odontograma_registros")
+}
+
+enum StatusPlanoTratamento {
+  ORCAMENTO
+  APROVADO
+  EM_ANDAMENTO
+  CONCLUIDO
+  RECUSADO
+  CANCELADO
+}
+
+/// Orçamento/plano de tratamento com valores particular x clube (o "você economizou").
+model PlanoTratamentoOdonto {
+  id                    String                @id @default(uuid(7)) @db.Uuid
+  tenantId              String                @map("tenant_id") @db.Uuid
+  pessoaId              String                @map("pessoa_id") @db.Uuid
+  beneficiarioId        String?               @map("beneficiario_id") @db.Uuid
+  profissionalId        String                @map("profissional_id") @db.Uuid
+  estabelecimentoId     String                @map("estabelecimento_id") @db.Uuid
+  titulo                String
+  status                StatusPlanoTratamento @default(ORCAMENTO)
+  valorParticularTotal  Decimal               @default(0) @map("valor_particular_total") @db.Decimal(12, 2)
+  valorDescontoTotal    Decimal               @default(0) @map("valor_desconto_total") @db.Decimal(12, 2)
+  valorFinalTotal       Decimal               @default(0) @map("valor_final_total") @db.Decimal(12, 2)
+  aprovadoEm            DateTime?             @map("aprovado_em") @db.Timestamptz(6)
+  /// Aceite do paciente (assinatura eletrônica simples no app).
+  aceiteHash            String?               @map("aceite_hash") @db.Char(64)
+  documentoId           String?               @unique @map("documento_id") @db.Uuid
+  observacoes           String?
+  criadoEm              DateTime              @default(now()) @map("criado_em") @db.Timestamptz(6)
+  atualizadoEm          DateTime              @updatedAt @map("atualizado_em") @db.Timestamptz(6)
+
+  tenant          Tenant               @relation(fields: [tenantId], references: [id])
+  pessoa          Pessoa               @relation(fields: [pessoaId], references: [id])
+  beneficiario    Beneficiario?        @relation(fields: [beneficiarioId], references: [id])
+  profissional    Profissional         @relation(fields: [profissionalId], references: [id])
+  estabelecimento Estabelecimento      @relation(fields: [estabelecimentoId], references: [id])
+  documento       Documento?           @relation(fields: [documentoId], references: [id])
+  procedimentos   ProcedimentoOdonto[]
+
+  @@index([tenantId, pessoaId])
+  @@map("planos_tratamento_odonto")
+}
+
+enum StatusProcedimentoOdonto {
+  PLANEJADO
+  AGENDADO
+  REALIZADO
+  CANCELADO
+}
+
+model ProcedimentoOdonto {
+  id                     String                   @id @default(uuid(7)) @db.Uuid
+  tenantId               String                   @map("tenant_id") @db.Uuid
+  planoTratamentoId      String                   @map("plano_tratamento_id") @db.Uuid
+  itemCatalogoId         String                   @map("item_catalogo_id") @db.Uuid
+  dente                  Int?                     @db.SmallInt
+  faces                  FaceDental[]
+  /// Sextante/arcada quando não é por dente (ex.: "S1", "ARCADA_SUPERIOR").
+  regiao                 String?
+  ordem                  Int                      @default(0) @db.SmallInt
+  status                 StatusProcedimentoOdonto @default(PLANEJADO)
+  valorParticular        Decimal                  @map("valor_particular") @db.Decimal(12, 2)
+  valorDesconto          Decimal                  @default(0) @map("valor_desconto") @db.Decimal(12, 2)
+  valorFinal             Decimal                  @map("valor_final") @db.Decimal(12, 2)
+  realizadoEm            DateTime?                @map("realizado_em") @db.Timestamptz(6)
+  atendimentoId          String?                  @map("atendimento_id") @db.Uuid
+  profissionalExecutorId String?                  @map("profissional_executor_id") @db.Uuid
+  /// Gerada quando o procedimento é realizado — alimenta repasse/comissão.
+  transacaoBeneficioId   String?                  @unique @map("transacao_beneficio_id") @db.Uuid
+
+  tenant               Tenant                @relation(fields: [tenantId], references: [id])
+  planoTratamento      PlanoTratamentoOdonto @relation(fields: [planoTratamentoId], references: [id], onDelete: Cascade)
+  itemCatalogo         ItemCatalogo          @relation(fields: [itemCatalogoId], references: [id])
+  atendimento          Atendimento?          @relation(fields: [atendimentoId], references: [id])
+  profissionalExecutor Profissional?         @relation(fields: [profissionalExecutorId], references: [id])
+  transacaoBeneficio   TransacaoBeneficio?   @relation(fields: [transacaoBeneficioId], references: [id])
+  odontogramaRegistros OdontogramaRegistro[]
+
+  @@index([planoTratamentoId])
+  @@map("procedimentos_odonto")
+}
+
+enum TipoImagemOdonto {
+  PERIAPICAL
+  INTERPROXIMAL
+  PANORAMICA
+  TELERRADIOGRAFIA
+  TOMOGRAFIA
+  FOTO_INTRAORAL
+  FOTO_EXTRAORAL
+}
+
+model ImagemOdonto {
+  id            String           @id @default(uuid(7)) @db.Uuid
+  tenantId      String           @map("tenant_id") @db.Uuid
+  pessoaId      String           @map("pessoa_id") @db.Uuid
+  atendimentoId String?          @map("atendimento_id") @db.Uuid
+  documentoId   String           @unique @map("documento_id") @db.Uuid
+  tipo          TipoImagemOdonto
+  dentes        Int[]            @db.SmallInt
+  capturadaEm   DateTime         @map("capturada_em") @db.Timestamptz(6)
+  /// Marcações desenhadas sobre a imagem no visualizador (formas, medidas).
+  anotacoes     Json?
+
+  tenant      Tenant       @relation(fields: [tenantId], references: [id])
+  pessoa      Pessoa       @relation(fields: [pessoaId], references: [id])
+  atendimento Atendimento? @relation(fields: [atendimentoId], references: [id])
+  documento   Documento    @relation(fields: [documentoId], references: [id])
+
+  @@index([pessoaId, capturadaEm])
+  @@map("imagens_odonto")
+}

@@ -1,0 +1,352 @@
+// =============================================================================
+// Módulo 1 — Área Master (SaaS / White Label) + estrutura de unidades
+// =============================================================================
+
+enum TipoTenant {
+  HOSPITAL_FILANTROPICO
+  HOSPITAL_PRIVADO
+  CLINICA
+  REDE_ODONTOLOGICA
+}
+
+enum StatusTenant {
+  IMPLANTACAO
+  ATIVO
+  SUSPENSO
+  ENCERRADO
+}
+
+enum ModuloSistema {
+  PLANOS
+  CATALOGO
+  REDE_CREDENCIADA
+  FINANCEIRO_B2C
+  FINANCEIRO_B2B
+  AGENDAMENTO
+  RECEPCAO
+  PEP
+  ODONTOLOGIA
+  FARMACIA
+  APP_CLIENTE
+  IA_ASSISTENTE
+  WHATSAPP
+  INTEGRACAO_LEGADO
+}
+
+enum AlvoDominio {
+  PAINEL
+  APP_CLIENTE
+  PORTAL_PARCEIRO
+  SITE_VENDAS
+}
+
+enum StatusAssinaturaSaas {
+  TRIAL
+  ATIVA
+  INADIMPLENTE
+  CANCELADA
+}
+
+/// Cliente SaaS (hospital, clínica ou rede odontológica). Raiz do isolamento multi-tenant.
+model Tenant {
+  id              String       @id @default(uuid(7)) @db.Uuid
+  slug            String       @unique
+  tipo            TipoTenant
+  status          StatusTenant @default(IMPLANTACAO)
+  razaoSocial     String       @map("razao_social")
+  nomeFantasia    String       @map("nome_fantasia")
+  cnpj            String       @unique @db.Char(14)
+  emailContato    String?      @map("email_contato")
+  telefoneContato String?      @map("telefone_contato")
+  fusoHorario     String       @default("America/Sao_Paulo") @map("fuso_horario")
+  /// Parâmetros operacionais não estruturais (ex.: juros/multa padrão, textos legais).
+  configuracoes   Json         @default("{}")
+  criadoEm        DateTime     @default(now()) @map("criado_em") @db.Timestamptz(6)
+  atualizadoEm    DateTime     @updatedAt @map("atualizado_em") @db.Timestamptz(6)
+
+  branding       TenantBranding?
+  dominios       TenantDominio[]
+  modulos        TenantModulo[]
+  assinaturaSaas AssinaturaSaas?
+  faturasSaas    FaturaSaas[]
+
+  estabelecimentos Estabelecimento[]
+  membros          Membro[]
+  papeis           Papel[]
+  papelPermissoes  PapelPermissao[]
+  membroPapeis     MembroPapel[]
+  dispositivos     Dispositivo[]
+  pessoas          Pessoa[]
+  consentimentos   Consentimento[]
+
+  planos             Plano[]
+  planoBeneficios    PlanoBeneficio[]
+  itensCatalogo      ItemCatalogo[]
+  tabelaPrecos       TabelaPrecoItem[]
+  assinaturas        Assinatura[]
+  beneficiarios      Beneficiario[]
+  validacoes         ValidacaoElegibilidade[]
+
+  profissionais               Profissional[]
+  profissionalEspecialidades  ProfissionalEspecialidade[]
+  profissionalEstabelecimentos ProfissionalEstabelecimento[]
+  gradesAgenda                GradeAgenda[]
+  bloqueiosAgenda             BloqueioAgenda[]
+  agendamentos                Agendamento[]
+  filasEspera                 FilaEspera[]
+
+  senhas      SenhaAtendimento[]
+  triagens    Triagem[]
+
+  prontuarios          Prontuario[]
+  atendimentos         Atendimento[]
+  registrosClinicos    RegistroClinico[]
+  prescricoes          Prescricao[]
+  prescricaoItens      PrescricaoItem[]
+  atestados            Atestado[]
+  solicitacoesExame    SolicitacaoExame[]
+  solicitacaoExameItens SolicitacaoExameItem[]
+  resultadosExame      ResultadoExame[]
+  documentos           Documento[]
+
+  odontogramaRegistros OdontogramaRegistro[]
+  planosTratamento     PlanoTratamentoOdonto[]
+  procedimentosOdonto  ProcedimentoOdonto[]
+  imagensOdonto        ImagemOdonto[]
+
+  faturas              Fatura[]
+  cobrancas            Cobranca[]
+  webhookEventos       WebhookEvento[]
+  reguasCobranca       ReguaCobranca[]
+  reguaEtapas          ReguaEtapa[]
+  renegociacoes        Renegociacao[]
+  renegociacaoFaturas  RenegociacaoFatura[]
+  transacoesBeneficio  TransacaoBeneficio[]
+  regrasRepasse        RegraRepasse[]
+  lotesRepasse         LoteRepasse[]
+  lancamentos          LancamentoFinanceiro[]
+
+  templatesMensagem    TemplateMensagem[]
+  notificacoes         Notificacao[]
+  avaliacoes           Avaliacao[]
+
+  conversasIa          ConversaIa[]
+  mensagensIa          MensagemIa[]
+  baseConhecimentoIa   BaseConhecimentoIa[]
+
+  conexoesLegadas      ConexaoLegada[]
+  mapeamentosLegados   MapeamentoLegado[]
+  execucoesSincronizacao ExecucaoSincronizacao[]
+  referenciasExternas  ReferenciaExterna[]
+
+  @@map("tenants")
+}
+
+/// Identidade visual do white label (painéis, app Flutter, e-mails, PDFs).
+model TenantBranding {
+  tenantId          String   @id @map("tenant_id") @db.Uuid
+  nomeApp           String   @map("nome_app")
+  logoPath          String?  @map("logo_path")
+  logoEscuroPath    String?  @map("logo_escuro_path")
+  faviconPath       String?  @map("favicon_path")
+  corPrimaria       String   @default("#0F766E") @map("cor_primaria")
+  corSecundaria     String   @default("#F7F9F6") @map("cor_secundaria")
+  corDestaque       String?  @map("cor_destaque")
+  fonte             String?
+  textoBoasVindas   String?  @map("texto_boas_vindas")
+  telefoneEmergencia String? @map("telefone_emergencia")
+  whatsappSuporte   String?  @map("whatsapp_suporte")
+  urlTermosUso      String?  @map("url_termos_uso")
+  urlPrivacidade    String?  @map("url_privacidade")
+  /// Projeto Firebase / bundle id próprios quando o app é publicado com a marca do cliente.
+  configApp         Json     @default("{}") @map("config_app")
+  atualizadoEm      DateTime @updatedAt @map("atualizado_em") @db.Timestamptz(6)
+
+  tenant Tenant @relation(fields: [tenantId], references: [id])
+
+  @@map("tenant_branding")
+}
+
+/// Domínios próprios por tenant (resolvidos no middleware do Next.js e na API).
+model TenantDominio {
+  id          String      @id @default(uuid(7)) @db.Uuid
+  tenantId    String      @map("tenant_id") @db.Uuid
+  host        String      @unique
+  alvo        AlvoDominio
+  principal   Boolean     @default(false)
+  verificadoEm DateTime?  @map("verificado_em") @db.Timestamptz(6)
+  criadoEm    DateTime    @default(now()) @map("criado_em") @db.Timestamptz(6)
+
+  tenant Tenant @relation(fields: [tenantId], references: [id])
+
+  @@index([tenantId])
+  @@map("tenant_dominios")
+}
+
+/// Feature flags: módulos contratados por tenant.
+model TenantModulo {
+  tenantId     String        @map("tenant_id") @db.Uuid
+  modulo       ModuloSistema
+  ativo        Boolean       @default(true)
+  atualizadoEm DateTime      @updatedAt @map("atualizado_em") @db.Timestamptz(6)
+
+  tenant Tenant @relation(fields: [tenantId], references: [id])
+
+  @@id([tenantId, modulo])
+  @@map("tenant_modulos")
+}
+
+/// Catálogo global de planos do produto SaaS (vendido aos hospitais).
+model PlanoSaas {
+  id                     String          @id @default(uuid(7)) @db.Uuid
+  codigo                 String          @unique
+  nome                   String
+  valorMensal            Decimal         @map("valor_mensal") @db.Decimal(12, 2)
+  valorPorAssociado      Decimal?        @map("valor_por_associado") @db.Decimal(12, 4)
+  limiteAssociados       Int?            @map("limite_associados")
+  limiteEstabelecimentos Int?            @map("limite_estabelecimentos")
+  modulosInclusos        ModuloSistema[] @map("modulos_inclusos")
+  ativo                  Boolean         @default(true)
+  criadoEm               DateTime        @default(now()) @map("criado_em") @db.Timestamptz(6)
+
+  assinaturas AssinaturaSaas[]
+
+  @@map("planos_saas")
+}
+
+model AssinaturaSaas {
+  id                String               @id @default(uuid(7)) @db.Uuid
+  tenantId          String               @unique @map("tenant_id") @db.Uuid
+  planoSaasId       String               @map("plano_saas_id") @db.Uuid
+  status            StatusAssinaturaSaas @default(TRIAL)
+  valorMensal       Decimal              @map("valor_mensal") @db.Decimal(12, 2)
+  diaVencimento     Int                  @map("dia_vencimento") @db.SmallInt
+  inicioEm          DateTime             @map("inicio_em") @db.Date
+  trialAte          DateTime?            @map("trial_ate") @db.Date
+  canceladaEm       DateTime?            @map("cancelada_em") @db.Timestamptz(6)
+  gateway           GatewayPagamento?
+  gatewayClienteId  String?              @map("gateway_cliente_id")
+  criadoEm          DateTime             @default(now()) @map("criado_em") @db.Timestamptz(6)
+  atualizadoEm      DateTime             @updatedAt @map("atualizado_em") @db.Timestamptz(6)
+
+  tenant    Tenant       @relation(fields: [tenantId], references: [id])
+  planoSaas PlanoSaas    @relation(fields: [planoSaasId], references: [id])
+  faturas   FaturaSaas[]
+
+  @@map("assinaturas_saas")
+}
+
+model FaturaSaas {
+  id                String       @id @default(uuid(7)) @db.Uuid
+  tenantId          String       @map("tenant_id") @db.Uuid
+  assinaturaSaasId  String       @map("assinatura_saas_id") @db.Uuid
+  competencia       DateTime     @db.Date
+  vencimento        DateTime     @db.Date
+  valor             Decimal      @db.Decimal(12, 2)
+  status            StatusFatura @default(ABERTA)
+  pagaEm            DateTime?    @map("paga_em") @db.Timestamptz(6)
+  gatewayCobrancaId String?      @map("gateway_cobranca_id")
+  linkPagamento     String?      @map("link_pagamento")
+  criadoEm          DateTime     @default(now()) @map("criado_em") @db.Timestamptz(6)
+
+  tenant         Tenant         @relation(fields: [tenantId], references: [id])
+  assinaturaSaas AssinaturaSaas @relation(fields: [assinaturaSaasId], references: [id])
+
+  @@unique([assinaturaSaasId, competencia])
+  @@map("faturas_saas")
+}
+
+// -----------------------------------------------------------------------------
+// Estabelecimentos: unidades próprias (matriz/filiais) E rede credenciada
+// (Módulo 5) num único cadastro — simplifica agenda, preços e transações B2B.
+// -----------------------------------------------------------------------------
+
+enum NaturezaEstabelecimento {
+  PROPRIO
+  CREDENCIADO
+}
+
+enum TipoEstabelecimento {
+  HOSPITAL
+  CLINICA
+  CONSULTORIO
+  LABORATORIO
+  CENTRO_IMAGEM
+  FARMACIA
+  CLINICA_ODONTOLOGICA
+  PROFISSIONAL_AUTONOMO
+  HOSPITAL_CONVENIADO
+}
+
+enum StatusCredenciamento {
+  EM_ANALISE
+  ATIVO
+  SUSPENSO
+  DESCREDENCIADO
+}
+
+model Estabelecimento {
+  id                      String                  @id @default(uuid(7)) @db.Uuid
+  tenantId                String                  @map("tenant_id") @db.Uuid
+  natureza                NaturezaEstabelecimento
+  tipo                    TipoEstabelecimento
+  /// Unidade-mãe (filial → matriz). Nulo para matriz e credenciados independentes.
+  matrizId                String?                 @map("matriz_id") @db.Uuid
+  nome                    String
+  razaoSocial             String?                 @map("razao_social")
+  /// CNPJ (14) ou CPF (11) para profissional autônomo — somente dígitos.
+  documento               String                  @db.VarChar(14)
+  cnes                    String?                 @db.VarChar(7)
+  status                  StatusCredenciamento    @default(EM_ANALISE)
+  contratoInicio          DateTime?               @map("contrato_inicio") @db.Date
+  contratoFim             DateTime?               @map("contrato_fim") @db.Date
+  telefone                String?
+  whatsapp                String?
+  email                   String?
+  cep                     String?                 @db.Char(8)
+  logradouro              String?
+  numero                  String?
+  complemento             String?
+  bairro                  String?
+  cidade                  String?
+  uf                      String?                 @db.Char(2)
+  latitude                Float?
+  longitude               Float?
+  horarioFuncionamento    Json?                   @map("horario_funcionamento")
+  chavePix                String?                 @map("chave_pix")
+  dadosBancariosCifrado   Bytes?                  @map("dados_bancarios_cifrado")
+  aceitaAgendamentoOnline Boolean                 @default(false) @map("aceita_agendamento_online")
+  /// Desnormalizado a partir de `avaliacoes` (atualizado por job) para ordenar a busca.
+  notaMedia               Decimal?                @map("nota_media") @db.Decimal(3, 2)
+  totalAvaliacoes         Int                     @default(0) @map("total_avaliacoes")
+  criadoEm                DateTime                @default(now()) @map("criado_em") @db.Timestamptz(6)
+  atualizadoEm            DateTime                @updatedAt @map("atualizado_em") @db.Timestamptz(6)
+  excluidoEm              DateTime?               @map("excluido_em") @db.Timestamptz(6)
+
+  tenant   Tenant            @relation(fields: [tenantId], references: [id])
+  matriz   Estabelecimento?  @relation("EstabelecimentoMatriz", fields: [matrizId], references: [id])
+  unidades Estabelecimento[] @relation("EstabelecimentoMatriz")
+
+  membroPapeis      MembroPapel[]
+  tabelaPrecos      TabelaPrecoItem[]
+  validacoes        ValidacaoElegibilidade[]
+  profissionais     ProfissionalEstabelecimento[]
+  gradesAgenda      GradeAgenda[]
+  bloqueiosAgenda   BloqueioAgenda[]
+  agendamentos      Agendamento[]
+  filasEspera       FilaEspera[]
+  senhas            SenhaAtendimento[]
+  atendimentos      Atendimento[]
+  resultadosExame   ResultadoExame[]
+  planosTratamento  PlanoTratamentoOdonto[]
+  transacoes        TransacaoBeneficio[]
+  regrasRepasse     RegraRepasse[]
+  lotesRepasse      LoteRepasse[]
+  lancamentos       LancamentoFinanceiro[]
+  avaliacoes        Avaliacao[]
+
+  @@unique([tenantId, documento])
+  @@index([tenantId, natureza, tipo, status])
+  @@index([tenantId, cidade])
+  @@map("estabelecimentos")
+}

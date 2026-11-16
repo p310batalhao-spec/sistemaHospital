@@ -1,0 +1,353 @@
+// =============================================================================
+// Módulos 3, 4 e 7 — Planos, Catálogo de Benefícios, Assinaturas e Carteirinha
+// =============================================================================
+
+enum CategoriaServico {
+  CONSULTA
+  EXAME_LABORATORIAL
+  EXAME_IMAGEM
+  ODONTOLOGIA
+  FARMACIA
+  VACINA
+  TERAPIA
+  CIRURGIA_ELETIVA
+  INTERNACAO
+  PRONTO_ATENDIMENTO
+  OUTRO
+}
+
+enum TipoRegraBeneficio {
+  /// Coberto integralmente pela mensalidade (dentro do limite).
+  INCLUSO
+  DESCONTO_PERCENTUAL
+  /// Preço fechado para o associado.
+  PRECO_FIXO
+  COPARTICIPACAO_PERCENTUAL
+  COPARTICIPACAO_VALOR
+}
+
+enum PeriodicidadeLimite {
+  DIA
+  MES
+  ANO
+  VIGENCIA
+}
+
+enum AbrangenciaRede {
+  PROPRIA
+  CREDENCIADA
+  TODAS
+}
+
+model Plano {
+  id                       String   @id @default(uuid(7)) @db.Uuid
+  tenantId                 String   @map("tenant_id") @db.Uuid
+  codigo                   String
+  nome                     String
+  descricao                String?
+  /// Ordem de exibição/upgrade (Bronze=1, Prata=2, Ouro=3...).
+  nivel                    Int      @default(1) @db.SmallInt
+  corDestaque              String?  @map("cor_destaque")
+  valorMensalidade         Decimal  @map("valor_mensalidade") @db.Decimal(12, 2)
+  valorAdesao              Decimal  @default(0) @map("valor_adesao") @db.Decimal(12, 2)
+  valorDependenteAdicional Decimal? @map("valor_dependente_adicional") @db.Decimal(12, 2)
+  dependentesInclusos      Int      @default(0) @map("dependentes_inclusos") @db.SmallInt
+  maxDependentes           Int?     @map("max_dependentes") @db.SmallInt
+  idadeMinima              Int?     @map("idade_minima") @db.SmallInt
+  idadeMaxima              Int?     @map("idade_maxima") @db.SmallInt
+  carenciaPadraoDias       Int      @default(0) @map("carencia_padrao_dias")
+  fidelidadeMeses          Int      @default(0) @map("fidelidade_meses") @db.SmallInt
+  raioCoberturaKm          Int?     @map("raio_cobertura_km")
+  cashbackPercentual       Decimal? @map("cashback_percentual") @db.Decimal(5, 2)
+  /// Visível no app/site de vendas.
+  publicado                Boolean  @default(false)
+  ativo                    Boolean  @default(true)
+  criadoEm                 DateTime @default(now()) @map("criado_em") @db.Timestamptz(6)
+  atualizadoEm             DateTime @updatedAt @map("atualizado_em") @db.Timestamptz(6)
+
+  tenant      Tenant           @relation(fields: [tenantId], references: [id])
+  beneficios  PlanoBeneficio[]
+  assinaturas Assinatura[]
+
+  @@unique([tenantId, codigo])
+  @@map("planos")
+}
+
+/// Regra de benefício do plano. Aplica-se a um item específico OU a uma categoria inteira;
+/// regra de item prevalece sobre a de categoria (campo `prioridade` desempata).
+model PlanoBeneficio {
+  id                  String               @id @default(uuid(7)) @db.Uuid
+  tenantId            String               @map("tenant_id") @db.Uuid
+  planoId             String               @map("plano_id") @db.Uuid
+  itemCatalogoId      String?              @map("item_catalogo_id") @db.Uuid
+  categoria           CategoriaServico?
+  tipoRegra           TipoRegraBeneficio   @map("tipo_regra")
+  /// Percentual ou valor em R$, conforme `tipoRegra` (ignorado para INCLUSO).
+  valor               Decimal              @default(0) @db.Decimal(12, 2)
+  carenciaDias        Int?                 @map("carencia_dias")
+  limiteQuantidade    Int?                 @map("limite_quantidade")
+  periodicidadeLimite PeriodicidadeLimite? @map("periodicidade_limite")
+  abrangencia         AbrangenciaRede      @default(TODAS)
+  aplicaDependentes   Boolean              @default(true) @map("aplica_dependentes")
+  prioridade          Int                  @default(0) @db.SmallInt
+  observacoes         String?
+  ativo               Boolean              @default(true)
+
+  tenant       Tenant               @relation(fields: [tenantId], references: [id])
+  plano        Plano                @relation(fields: [planoId], references: [id], onDelete: Cascade)
+  itemCatalogo ItemCatalogo?        @relation(fields: [itemCatalogoId], references: [id])
+  transacoes   TransacaoBeneficio[]
+
+  @@index([planoId, categoria])
+  @@index([planoId, itemCatalogoId])
+  @@map("plano_beneficios")
+}
+
+/// Serviço/produto ofertado (consulta, exame, procedimento odonto, medicamento...).
+model ItemCatalogo {
+  id                        String           @id @default(uuid(7)) @db.Uuid
+  tenantId                  String           @map("tenant_id") @db.Uuid
+  categoria                 CategoriaServico
+  codigoInterno             String           @map("codigo_interno")
+  /// Terminologia TUSS (procedimentos médicos e odontológicos).
+  codigoTuss                String?          @map("codigo_tuss") @db.VarChar(10)
+  /// Código de barras (farmácia).
+  codigoEan                 String?          @map("codigo_ean") @db.VarChar(14)
+  nome                      String
+  descricao                 String?
+  especialidadeId           String?          @map("especialidade_id") @db.Uuid
+  precoParticularReferencia Decimal          @map("preco_particular_referencia") @db.Decimal(12, 2)
+  exigePedidoMedico         Boolean          @default(false) @map("exige_pedido_medico")
+  exigeAgendamento          Boolean          @default(true) @map("exige_agendamento")
+  instrucoesPreparo         String?          @map("instrucoes_preparo")
+  ativo                     Boolean          @default(true)
+  criadoEm                  DateTime         @default(now()) @map("criado_em") @db.Timestamptz(6)
+  atualizadoEm              DateTime         @updatedAt @map("atualizado_em") @db.Timestamptz(6)
+
+  tenant        Tenant         @relation(fields: [tenantId], references: [id])
+  especialidade Especialidade? @relation(fields: [especialidadeId], references: [id])
+
+  beneficios           PlanoBeneficio[]
+  precos               TabelaPrecoItem[]
+  validacoes           ValidacaoElegibilidade[]
+  agendamentos         Agendamento[]
+  filasEspera          FilaEspera[]
+  solicitacaoItens     SolicitacaoExameItem[]
+  resultados           ResultadoExame[]
+  procedimentosOdonto  ProcedimentoOdonto[]
+  transacoes           TransacaoBeneficio[]
+  regrasRepasse        RegraRepasse[]
+
+  @@unique([tenantId, codigoInterno])
+  @@index([tenantId, categoria])
+  @@index([tenantId, codigoTuss])
+  @@map("itens_catalogo")
+}
+
+/// Preço praticado por cada estabelecimento (próprio ou credenciado), com vigência.
+model TabelaPrecoItem {
+  id                String    @id @default(uuid(7)) @db.Uuid
+  tenantId          String    @map("tenant_id") @db.Uuid
+  itemCatalogoId    String    @map("item_catalogo_id") @db.Uuid
+  estabelecimentoId String    @map("estabelecimento_id") @db.Uuid
+  precoParticular   Decimal   @map("preco_particular") @db.Decimal(12, 2)
+  /// Preço negociado para associados; quando nulo, aplica-se a regra do plano sobre o particular.
+  precoClube        Decimal?  @map("preco_clube") @db.Decimal(12, 2)
+  vigenciaInicio    DateTime  @map("vigencia_inicio") @db.Date
+  vigenciaFim       DateTime? @map("vigencia_fim") @db.Date
+  criadoEm          DateTime  @default(now()) @map("criado_em") @db.Timestamptz(6)
+
+  tenant          Tenant          @relation(fields: [tenantId], references: [id])
+  itemCatalogo    ItemCatalogo    @relation(fields: [itemCatalogoId], references: [id])
+  estabelecimento Estabelecimento @relation(fields: [estabelecimentoId], references: [id])
+
+  @@index([estabelecimentoId, itemCatalogoId, vigenciaInicio])
+  @@map("tabela_precos_itens")
+}
+
+// -----------------------------------------------------------------------------
+// Assinaturas (contrato do associado) e beneficiários
+// -----------------------------------------------------------------------------
+
+enum StatusAssinatura {
+  PENDENTE_ATIVACAO
+  ATIVA
+  INADIMPLENTE
+  /// Benefícios bloqueados pela régua de cobrança.
+  SUSPENSA
+  CANCELADA
+}
+
+enum CanalVenda {
+  APP
+  SITE
+  RECEPCAO
+  VENDEDOR
+  WHATSAPP
+  IMPORTACAO
+}
+
+enum GatewayPagamento {
+  ASAAS
+  MERCADO_PAGO
+  STRIPE
+  MANUAL
+}
+
+enum MetodoPagamento {
+  PIX
+  BOLETO
+  CARTAO_CREDITO
+  DINHEIRO
+}
+
+model Assinatura {
+  id                       String           @id @default(uuid(7)) @db.Uuid
+  tenantId                 String           @map("tenant_id") @db.Uuid
+  numeroContrato           String           @map("numero_contrato")
+  planoId                  String           @map("plano_id") @db.Uuid
+  titularId                String           @map("titular_id") @db.Uuid
+  /// Quem paga, quando diferente do titular (ex.: filho paga plano Sênior dos pais).
+  responsavelFinanceiroId  String?          @map("responsavel_financeiro_id") @db.Uuid
+  status                   StatusAssinatura @default(PENDENTE_ATIVACAO)
+  canalVenda               CanalVenda       @map("canal_venda")
+  vendedorMembroId         String?          @map("vendedor_membro_id") @db.Uuid
+  /// Snapshot do preço contratado — reajustes do plano não alteram contratos vigentes.
+  valorMensalidade         Decimal          @map("valor_mensalidade") @db.Decimal(12, 2)
+  diaVencimento            Int              @map("dia_vencimento") @db.SmallInt
+  metodoPagamentoPreferido MetodoPagamento  @map("metodo_pagamento_preferido")
+  gateway                  GatewayPagamento
+  gatewayClienteId         String?          @map("gateway_cliente_id")
+  gatewayAssinaturaId      String?          @map("gateway_assinatura_id")
+  reguaCobrancaId          String?          @map("regua_cobranca_id") @db.Uuid
+  inicioVigencia           DateTime         @map("inicio_vigencia") @db.Date
+  fimFidelidade            DateTime?        @map("fim_fidelidade") @db.Date
+  suspensaEm               DateTime?        @map("suspensa_em") @db.Timestamptz(6)
+  canceladaEm              DateTime?        @map("cancelada_em") @db.Timestamptz(6)
+  motivoCancelamento       String?          @map("motivo_cancelamento")
+  criadoEm                 DateTime         @default(now()) @map("criado_em") @db.Timestamptz(6)
+  atualizadoEm             DateTime         @updatedAt @map("atualizado_em") @db.Timestamptz(6)
+
+  tenant                Tenant         @relation(fields: [tenantId], references: [id])
+  plano                 Plano          @relation(fields: [planoId], references: [id])
+  titular               Pessoa         @relation("AssinaturaTitular", fields: [titularId], references: [id])
+  responsavelFinanceiro Pessoa?        @relation("AssinaturaResponsavel", fields: [responsavelFinanceiroId], references: [id])
+  reguaCobranca         ReguaCobranca? @relation(fields: [reguaCobrancaId], references: [id])
+
+  beneficiarios Beneficiario[]
+  faturas       Fatura[]
+  renegociacoes Renegociacao[]
+
+  @@unique([tenantId, numeroContrato])
+  @@unique([gateway, gatewayAssinaturaId])
+  @@index([tenantId, status])
+  @@index([tenantId, titularId])
+  @@map("assinaturas")
+}
+
+enum TipoBeneficiario {
+  TITULAR
+  DEPENDENTE
+}
+
+enum Parentesco {
+  CONJUGE
+  FILHO
+  ENTEADO
+  PAI
+  MAE
+  NETO
+  IRMAO
+  OUTRO
+}
+
+enum StatusBeneficiario {
+  ATIVO
+  SUSPENSO
+  CANCELADO
+}
+
+/// Titular ou dependente coberto por uma assinatura. Também representa a carteirinha digital.
+model Beneficiario {
+  id                 String             @id @default(uuid(7)) @db.Uuid
+  tenantId           String             @map("tenant_id") @db.Uuid
+  assinaturaId       String             @map("assinatura_id") @db.Uuid
+  pessoaId           String             @map("pessoa_id") @db.Uuid
+  tipo               TipoBeneficiario
+  parentesco         Parentesco?
+  numeroCarteirinha  String             @map("numero_carteirinha")
+  status             StatusBeneficiario @default(ATIVO)
+  inicioVigencia     DateTime           @map("inicio_vigencia") @db.Date
+  fimVigencia        DateTime?          @map("fim_vigencia") @db.Date
+  carenciaAte        DateTime?          @map("carencia_ate") @db.Date
+  /// Segredo TOTP (RFC 6238) cifrado: o app gera o QR dinâmico inclusive offline;
+  /// a validação no balcão recalcula o código no servidor.
+  segredoQrCifrado   Bytes              @map("segredo_qr_cifrado")
+  /// Incrementar invalida carteirinhas/QRs emitidos anteriormente (perda do celular).
+  versaoCarteirinha  Int                @default(1) @map("versao_carteirinha")
+  criadoEm           DateTime           @default(now()) @map("criado_em") @db.Timestamptz(6)
+  atualizadoEm       DateTime           @updatedAt @map("atualizado_em") @db.Timestamptz(6)
+
+  tenant     Tenant     @relation(fields: [tenantId], references: [id])
+  assinatura Assinatura @relation(fields: [assinaturaId], references: [id])
+  pessoa     Pessoa     @relation(fields: [pessoaId], references: [id])
+
+  validacoes       ValidacaoElegibilidade[]
+  agendamentos     Agendamento[]
+  filasEspera      FilaEspera[]
+  atendimentos     Atendimento[]
+  planosTratamento PlanoTratamentoOdonto[]
+  transacoes       TransacaoBeneficio[]
+
+  @@unique([tenantId, numeroCarteirinha])
+  @@unique([assinaturaId, pessoaId])
+  @@index([tenantId, pessoaId])
+  @@map("beneficiarios")
+}
+
+enum MetodoValidacao {
+  QR_CODE
+  CPF
+  NUMERO_CARTEIRINHA
+  API_PARCEIRO
+}
+
+enum ResultadoValidacao {
+  ELEGIVEL
+  EM_CARENCIA
+  INADIMPLENTE
+  SUSPENSO
+  CANCELADO
+  NAO_ENCONTRADO
+  QR_INVALIDO
+  LIMITE_ATINGIDO
+  FORA_DA_ABRANGENCIA
+}
+
+/// Toda consulta de elegibilidade (balcão de farmácia, recepção, portal do parceiro) fica registrada.
+model ValidacaoElegibilidade {
+  id                String             @id @default(uuid(7)) @db.Uuid
+  tenantId          String             @map("tenant_id") @db.Uuid
+  beneficiarioId    String?            @map("beneficiario_id") @db.Uuid
+  estabelecimentoId String             @map("estabelecimento_id") @db.Uuid
+  membroId          String             @map("membro_id") @db.Uuid
+  itemCatalogoId    String?            @map("item_catalogo_id") @db.Uuid
+  metodo            MetodoValidacao
+  resultado         ResultadoValidacao
+  ip                String?            @db.Inet
+  latitude          Float?
+  longitude         Float?
+  criadoEm          DateTime           @default(now()) @map("criado_em") @db.Timestamptz(6)
+
+  tenant          Tenant          @relation(fields: [tenantId], references: [id])
+  beneficiario    Beneficiario?   @relation(fields: [beneficiarioId], references: [id])
+  estabelecimento Estabelecimento @relation(fields: [estabelecimentoId], references: [id])
+  membro          Membro          @relation(fields: [membroId], references: [id])
+  itemCatalogo    ItemCatalogo?   @relation(fields: [itemCatalogoId], references: [id])
+
+  transacoes TransacaoBeneficio[]
+
+  @@index([tenantId, beneficiarioId, criadoEm])
+  @@index([tenantId, estabelecimentoId, criadoEm])
+  @@map("validacoes_elegibilidade")
+}

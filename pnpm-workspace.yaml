@@ -1,0 +1,5 @@
+packages:
+  - "apps/api"
+  - "apps/web"
+  - "packages/*"
+# apps/mobile (Flutter) fica fora do workspace JS — gerenciado pelo pub/melos.

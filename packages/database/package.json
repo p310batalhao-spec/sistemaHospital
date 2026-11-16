@@ -1,0 +1,25 @@
+{
+  "name": "@elo-saude/database",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "./src/index.ts",
+  "scripts": {
+    "generate": "prisma generate",
+    "validate": "prisma validate",
+    "format": "prisma format",
+    "migrate:dev": "prisma migrate dev",
+    "migrate:deploy": "prisma migrate deploy",
+    "studio": "prisma studio"
+  },
+  "dependencies": {
+    "@prisma/adapter-pg": "7.10.1",
+    "@prisma/client": "7.10.1",
+    "pg": "^8.16.0"
+  },
+  "devDependencies": {
+    "dotenv": "^16.5.0",
+    "prisma": "7.10.1",
+    "tsx": "^4.20.0"
+  }
+}

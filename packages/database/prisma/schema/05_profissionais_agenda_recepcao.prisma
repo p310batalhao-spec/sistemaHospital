@@ -1,0 +1,390 @@
+// =============================================================================
+// Módulos 6, 9 e 10 — Profissionais, Agendamento Inteligente, Recepção & Triagem
+// =============================================================================
+
+enum ConselhoProfissional {
+  CRM
+  CRO
+  CRF
+  CRP
+  CREFITO
+  COREN
+  CRN
+  CRFA
+  CRBM
+  OUTRO
+}
+
+enum AreaEspecialidade {
+  MEDICA
+  ODONTOLOGICA
+  MULTIPROFISSIONAL
+}
+
+/// Catálogo global (CFM/CFO/CBO). Sem tenant_id: leitura liberada a todos os tenants.
+model Especialidade {
+  id       String            @id @default(uuid(7)) @db.Uuid
+  codigo   String            @unique
+  nome     String
+  area     AreaEspecialidade
+  conselho ConselhoProfissional?
+  ativa    Boolean           @default(true)
+
+  itensCatalogo      ItemCatalogo[]
+  profissionais      ProfissionalEspecialidade[]
+  gradesAgenda       GradeAgenda[]
+  agendamentos       Agendamento[]
+  filasEspera        FilaEspera[]
+  atendimentos       Atendimento[]
+  triagensSugeridas  Triagem[]
+  conversasIa        ConversaIa[]
+
+  @@map("especialidades")
+}
+
+model Profissional {
+  id                 String               @id @default(uuid(7)) @db.Uuid
+  tenantId           String               @map("tenant_id") @db.Uuid
+  nome               String
+  nomeExibicao       String?              @map("nome_exibicao")
+  cpfHash            String?              @map("cpf_hash") @db.Char(64)
+  cpfCifrado         Bytes?               @map("cpf_cifrado")
+  conselho           ConselhoProfissional
+  numeroConselho     String               @map("numero_conselho")
+  ufConselho         String               @map("uf_conselho") @db.Char(2)
+  sexo               Sexo?
+  fotoPath           String?              @map("foto_path")
+  miniCurriculo      String?              @map("mini_curriculo")
+  email              String?
+  telefone           String?
+  atendeTeleconsulta Boolean              @default(false) @map("atende_teleconsulta")
+  ativo              Boolean              @default(true)
+  notaMedia          Decimal?             @map("nota_media") @db.Decimal(3, 2)
+  totalAvaliacoes    Int                  @default(0) @map("total_avaliacoes")
+  criadoEm           DateTime             @default(now()) @map("criado_em") @db.Timestamptz(6)
+  atualizadoEm       DateTime             @updatedAt @map("atualizado_em") @db.Timestamptz(6)
+
+  tenant Tenant  @relation(fields: [tenantId], references: [id])
+  membro Membro?
+
+  especialidades          ProfissionalEspecialidade[]
+  estabelecimentos        ProfissionalEstabelecimento[]
+  gradesAgenda            GradeAgenda[]
+  bloqueiosAgenda         BloqueioAgenda[]
+  agendamentos            Agendamento[]
+  filasEspera             FilaEspera[]
+  triagens                Triagem[]
+  atendimentos            Atendimento[]
+  registrosClinicos       RegistroClinico[]
+  prescricoes             Prescricao[]
+  atestados               Atestado[]
+  solicitacoesExame       SolicitacaoExame[]
+  odontogramaRegistros    OdontogramaRegistro[]
+  planosTratamento        PlanoTratamentoOdonto[]
+  procedimentosExecutados ProcedimentoOdonto[]
+  transacoes              TransacaoBeneficio[]
+  regrasRepasse           RegraRepasse[]
+  lotesRepasse            LoteRepasse[]
+  avaliacoes              Avaliacao[]
+
+  @@unique([tenantId, conselho, numeroConselho, ufConselho])
+  @@map("profissionais")
+}
+
+model ProfissionalEspecialidade {
+  tenantId        String  @map("tenant_id") @db.Uuid
+  profissionalId  String  @map("profissional_id") @db.Uuid
+  especialidadeId String  @map("especialidade_id") @db.Uuid
+  /// Registro de Qualificação de Especialista.
+  rqe             String?
+
+  tenant        Tenant        @relation(fields: [tenantId], references: [id])
+  profissional  Profissional  @relation(fields: [profissionalId], references: [id], onDelete: Cascade)
+  especialidade Especialidade @relation(fields: [especialidadeId], references: [id])
+
+  @@id([profissionalId, especialidadeId])
+  @@map("profissional_especialidades")
+}
+
+/// Onde o profissional atende (pode atuar na matriz e em clínicas credenciadas).
+model ProfissionalEstabelecimento {
+  id                String   @id @default(uuid(7)) @db.Uuid
+  tenantId          String   @map("tenant_id") @db.Uuid
+  profissionalId    String   @map("profissional_id") @db.Uuid
+  estabelecimentoId String   @map("estabelecimento_id") @db.Uuid
+  ativo             Boolean  @default(true)
+  criadoEm          DateTime @default(now()) @map("criado_em") @db.Timestamptz(6)
+
+  tenant          Tenant          @relation(fields: [tenantId], references: [id])
+  profissional    Profissional    @relation(fields: [profissionalId], references: [id], onDelete: Cascade)
+  estabelecimento Estabelecimento @relation(fields: [estabelecimentoId], references: [id])
+
+  @@unique([profissionalId, estabelecimentoId])
+  @@map("profissional_estabelecimentos")
+}
+
+enum TipoAtendimento {
+  CONSULTA
+  RETORNO
+  EXAME
+  PROCEDIMENTO
+  ODONTOLOGIA
+  TELECONSULTA
+  PRONTO_ATENDIMENTO
+  TERAPIA
+  VACINA
+}
+
+/// Grade semanal recorrente; os horários livres são calculados (não materializados).
+model GradeAgenda {
+  id                       String          @id @default(uuid(7)) @db.Uuid
+  tenantId                 String          @map("tenant_id") @db.Uuid
+  profissionalId           String          @map("profissional_id") @db.Uuid
+  estabelecimentoId        String          @map("estabelecimento_id") @db.Uuid
+  especialidadeId          String?         @map("especialidade_id") @db.Uuid
+  tipoAtendimento          TipoAtendimento @default(CONSULTA) @map("tipo_atendimento")
+  /// 0 = domingo ... 6 = sábado
+  diaSemana                Int             @map("dia_semana") @db.SmallInt
+  horaInicio               DateTime        @map("hora_inicio") @db.Time(0)
+  horaFim                  DateTime        @map("hora_fim") @db.Time(0)
+  duracaoMinutos           Int             @map("duracao_minutos") @db.SmallInt
+  vagasPorHorario          Int             @default(1) @map("vagas_por_horario") @db.SmallInt
+  permiteAgendamentoOnline Boolean         @default(true) @map("permite_agendamento_online")
+  vigenciaInicio           DateTime        @map("vigencia_inicio") @db.Date
+  vigenciaFim              DateTime?       @map("vigencia_fim") @db.Date
+
+  tenant          Tenant          @relation(fields: [tenantId], references: [id])
+  profissional    Profissional    @relation(fields: [profissionalId], references: [id])
+  estabelecimento Estabelecimento @relation(fields: [estabelecimentoId], references: [id])
+  especialidade   Especialidade?  @relation(fields: [especialidadeId], references: [id])
+
+  @@index([profissionalId, diaSemana])
+  @@map("grades_agenda")
+}
+
+/// Férias, congressos, feriados locais.
+model BloqueioAgenda {
+  id                String   @id @default(uuid(7)) @db.Uuid
+  tenantId          String   @map("tenant_id") @db.Uuid
+  profissionalId    String   @map("profissional_id") @db.Uuid
+  /// Nulo = bloqueia em todos os estabelecimentos.
+  estabelecimentoId String?  @map("estabelecimento_id") @db.Uuid
+  inicio            DateTime @db.Timestamptz(6)
+  fim               DateTime @db.Timestamptz(6)
+  motivo            String?
+
+  tenant          Tenant           @relation(fields: [tenantId], references: [id])
+  profissional    Profissional     @relation(fields: [profissionalId], references: [id])
+  estabelecimento Estabelecimento? @relation(fields: [estabelecimentoId], references: [id])
+
+  @@index([profissionalId, inicio])
+  @@map("bloqueios_agenda")
+}
+
+enum StatusAgendamento {
+  SOLICITADO
+  AGENDADO
+  CONFIRMADO
+  CHECKIN
+  EM_ATENDIMENTO
+  ATENDIDO
+  FALTOU
+  CANCELADO
+  REMARCADO
+}
+
+enum OrigemAgendamento {
+  APP
+  PORTAL
+  WHATSAPP
+  RECEPCAO
+  IA_ASSISTENTE
+  CALL_CENTER
+  INTEGRACAO
+}
+
+model Agendamento {
+  id                 String            @id @default(uuid(7)) @db.Uuid
+  tenantId           String            @map("tenant_id") @db.Uuid
+  pessoaId           String            @map("pessoa_id") @db.Uuid
+  /// Nulo para atendimento particular de não associado.
+  beneficiarioId     String?           @map("beneficiario_id") @db.Uuid
+  estabelecimentoId  String            @map("estabelecimento_id") @db.Uuid
+  profissionalId     String?           @map("profissional_id") @db.Uuid
+  especialidadeId    String?           @map("especialidade_id") @db.Uuid
+  itemCatalogoId     String?           @map("item_catalogo_id") @db.Uuid
+  tipo               TipoAtendimento
+  inicio             DateTime          @db.Timestamptz(6)
+  fim                DateTime          @db.Timestamptz(6)
+  status             StatusAgendamento @default(AGENDADO)
+  origem             OrigemAgendamento
+  observacoes        String?
+  confirmadoEm       DateTime?         @map("confirmado_em") @db.Timestamptz(6)
+  canceladoEm        DateTime?         @map("cancelado_em") @db.Timestamptz(6)
+  motivoCancelamento String?           @map("motivo_cancelamento")
+  remarcadoDeId      String?           @map("remarcado_de_id") @db.Uuid
+  criadoPorUsuarioId String?           @map("criado_por_usuario_id") @db.Uuid
+  criadoEm           DateTime          @default(now()) @map("criado_em") @db.Timestamptz(6)
+  atualizadoEm       DateTime          @updatedAt @map("atualizado_em") @db.Timestamptz(6)
+
+  tenant          Tenant           @relation(fields: [tenantId], references: [id])
+  pessoa          Pessoa           @relation(fields: [pessoaId], references: [id])
+  beneficiario    Beneficiario?    @relation(fields: [beneficiarioId], references: [id])
+  estabelecimento Estabelecimento  @relation(fields: [estabelecimentoId], references: [id])
+  profissional    Profissional?    @relation(fields: [profissionalId], references: [id])
+  especialidade   Especialidade?   @relation(fields: [especialidadeId], references: [id])
+  itemCatalogo    ItemCatalogo?    @relation(fields: [itemCatalogoId], references: [id])
+  remarcadoDe     Agendamento?     @relation("Remarcacao", fields: [remarcadoDeId], references: [id])
+  remarcacoes     Agendamento[]    @relation("Remarcacao")
+
+  filaEspera       FilaEspera?
+  senhas           SenhaAtendimento[]
+  atendimento      Atendimento?
+  solicitacaoItens SolicitacaoExameItem[]
+  notificacoes     Notificacao[]
+  transacoes       TransacaoBeneficio[]
+  conversasIa      ConversaIa[]
+
+  @@index([tenantId, profissionalId, inicio])
+  @@index([tenantId, estabelecimentoId, inicio])
+  @@index([tenantId, pessoaId, inicio])
+  @@index([tenantId, status, inicio])
+  @@map("agendamentos")
+}
+
+enum StatusFilaEspera {
+  AGUARDANDO
+  OFERTADO
+  AGENDADO
+  DESISTIU
+  EXPIRADO
+}
+
+model FilaEspera {
+  id                String           @id @default(uuid(7)) @db.Uuid
+  tenantId          String           @map("tenant_id") @db.Uuid
+  pessoaId          String           @map("pessoa_id") @db.Uuid
+  beneficiarioId    String?          @map("beneficiario_id") @db.Uuid
+  especialidadeId   String?          @map("especialidade_id") @db.Uuid
+  profissionalId    String?          @map("profissional_id") @db.Uuid
+  estabelecimentoId String?          @map("estabelecimento_id") @db.Uuid
+  itemCatalogoId    String?          @map("item_catalogo_id") @db.Uuid
+  prioridade        Int              @default(0) @db.SmallInt
+  /// Ex.: {"turnos":["MANHA"],"diasSemana":[1,3,5]}
+  preferencias      Json?
+  status            StatusFilaEspera @default(AGUARDANDO)
+  /// Vaga ofertada automaticamente quando um agendamento é cancelado.
+  agendamentoId     String?          @unique @map("agendamento_id") @db.Uuid
+  ofertadoEm        DateTime?        @map("ofertado_em") @db.Timestamptz(6)
+  ofertaExpiraEm    DateTime?        @map("oferta_expira_em") @db.Timestamptz(6)
+  criadoEm          DateTime         @default(now()) @map("criado_em") @db.Timestamptz(6)
+
+  tenant          Tenant           @relation(fields: [tenantId], references: [id])
+  pessoa          Pessoa           @relation(fields: [pessoaId], references: [id])
+  beneficiario    Beneficiario?    @relation(fields: [beneficiarioId], references: [id])
+  especialidade   Especialidade?   @relation(fields: [especialidadeId], references: [id])
+  profissional    Profissional?    @relation(fields: [profissionalId], references: [id])
+  estabelecimento Estabelecimento? @relation(fields: [estabelecimentoId], references: [id])
+  itemCatalogo    ItemCatalogo?    @relation(fields: [itemCatalogoId], references: [id])
+  agendamento     Agendamento?     @relation(fields: [agendamentoId], references: [id])
+
+  @@index([tenantId, status, especialidadeId, prioridade])
+  @@map("filas_espera")
+}
+
+// -----------------------------------------------------------------------------
+// Recepção: senhas, painel de chamada e triagem
+// -----------------------------------------------------------------------------
+
+enum TipoSenha {
+  NORMAL
+  /// Lei 10.048/2000: idosos 60+, gestantes, PcD, lactantes.
+  PRIORITARIA
+  /// Lei 13.466/2017: 80+ têm prioridade sobre os demais prioritários.
+  PRIORITARIA_80
+  AGENDADO
+  EXAME
+}
+
+enum StatusSenha {
+  AGUARDANDO
+  CHAMADA
+  EM_ATENDIMENTO
+  FINALIZADA
+  NAO_COMPARECEU
+  CANCELADA
+}
+
+model SenhaAtendimento {
+  id                 String           @id @default(uuid(7)) @db.Uuid
+  tenantId           String           @map("tenant_id") @db.Uuid
+  estabelecimentoId  String           @map("estabelecimento_id") @db.Uuid
+  data               DateTime         @db.Date
+  prefixo            String           @db.VarChar(3)
+  numero             Int
+  /// Exibido no painel: "P012", "A045".
+  codigo             String           @db.VarChar(10)
+  tipo               TipoSenha
+  status             StatusSenha      @default(AGUARDANDO)
+  pessoaId           String?          @map("pessoa_id") @db.Uuid
+  agendamentoId      String?          @map("agendamento_id") @db.Uuid
+  metodoCheckin      MetodoValidacao? @map("metodo_checkin")
+  setor              String?
+  /// Guichê ou consultório exibido no painel de chamada.
+  localChamada       String?          @map("local_chamada")
+  chamadaPorMembroId String?          @map("chamada_por_membro_id") @db.Uuid
+  emitidaEm          DateTime         @default(now()) @map("emitida_em") @db.Timestamptz(6)
+  chamadaEm          DateTime?        @map("chamada_em") @db.Timestamptz(6)
+  atendidaEm         DateTime?        @map("atendida_em") @db.Timestamptz(6)
+  finalizadaEm       DateTime?        @map("finalizada_em") @db.Timestamptz(6)
+
+  tenant          Tenant          @relation(fields: [tenantId], references: [id])
+  estabelecimento Estabelecimento @relation(fields: [estabelecimentoId], references: [id])
+  pessoa          Pessoa?         @relation(fields: [pessoaId], references: [id])
+  agendamento     Agendamento?    @relation(fields: [agendamentoId], references: [id])
+  atendimento     Atendimento?
+  triagem         Triagem?
+
+  @@unique([estabelecimentoId, data, prefixo, numero])
+  @@index([estabelecimentoId, data, status])
+  @@map("senhas_atendimento")
+}
+
+/// Protocolo de Manchester.
+enum ClassificacaoRisco {
+  VERMELHO
+  LARANJA
+  AMARELO
+  VERDE
+  AZUL
+}
+
+model Triagem {
+  id                      String              @id @default(uuid(7)) @db.Uuid
+  tenantId                String              @map("tenant_id") @db.Uuid
+  pessoaId                String              @map("pessoa_id") @db.Uuid
+  senhaId                 String?             @unique @map("senha_id") @db.Uuid
+  atendimentoId           String?             @unique @map("atendimento_id") @db.Uuid
+  /// Enfermeiro(a) responsável.
+  profissionalId          String?             @map("profissional_id") @db.Uuid
+  queixaPrincipal         String              @map("queixa_principal")
+  /// {"paSistolica":120,"paDiastolica":80,"fc":72,"fr":16,"temperatura":36.5,"spo2":98,"glicemia":95,"dor":3,"pesoKg":70,"alturaCm":170}
+  sinaisVitais            Json                @map("sinais_vitais")
+  classificacao           ClassificacaoRisco?
+  especialidadeSugeridaId String?             @map("especialidade_sugerida_id") @db.Uuid
+  /// Conversa da IA que apoiou a triagem (apenas sugestão; decisão é do profissional).
+  conversaIaId            String?             @map("conversa_ia_id") @db.Uuid
+  observacoes             String?
+  realizadaEm             DateTime            @default(now()) @map("realizada_em") @db.Timestamptz(6)
+
+  tenant                Tenant            @relation(fields: [tenantId], references: [id])
+  pessoa                Pessoa            @relation(fields: [pessoaId], references: [id])
+  senha                 SenhaAtendimento? @relation(fields: [senhaId], references: [id])
+  atendimento           Atendimento?      @relation(fields: [atendimentoId], references: [id])
+  profissional          Profissional?     @relation(fields: [profissionalId], references: [id])
+  especialidadeSugerida Especialidade?    @relation(fields: [especialidadeSugeridaId], references: [id])
+  conversaIa            ConversaIa?       @relation(fields: [conversaIaId], references: [id])
+
+  @@index([tenantId, realizadaEm])
+  @@map("triagens")
+}

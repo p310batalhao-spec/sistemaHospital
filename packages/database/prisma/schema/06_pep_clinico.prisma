@@ -1,0 +1,352 @@
+// =============================================================================
+// Módulos 11 e 13 — Atendimento, Prontuário Eletrônico (PEP), receitas,
+// atestados, pedidos e resultados de exames.
+// Regras: CFM 1.821/2007 e Lei 13.787/2018 (guarda mínima de 20 anos);
+// documentos assinados são imutáveis (trigger) — correções via retificação.
+// =============================================================================
+
+model Prontuario {
+  id                 String   @id @default(uuid(7)) @db.Uuid
+  tenantId           String   @map("tenant_id") @db.Uuid
+  pessoaId           String   @unique @map("pessoa_id") @db.Uuid
+  numero             String
+  /// [{"substancia":"Dipirona","reacao":"urticária","gravidade":"MODERADA"}]
+  alergias           Json     @default("[]")
+  condicoesCronicas  Json     @default("[]") @map("condicoes_cronicas")
+  medicamentosEmUso  Json     @default("[]") @map("medicamentos_em_uso")
+  tipoSanguineo      String?  @map("tipo_sanguineo") @db.VarChar(3)
+  observacoesCifrado Bytes?   @map("observacoes_cifrado")
+  criadoEm           DateTime @default(now()) @map("criado_em") @db.Timestamptz(6)
+  atualizadoEm       DateTime @updatedAt @map("atualizado_em") @db.Timestamptz(6)
+
+  tenant Tenant @relation(fields: [tenantId], references: [id])
+  pessoa Pessoa @relation(fields: [pessoaId], references: [id])
+
+  atendimentos         Atendimento[]
+  registros            RegistroClinico[]
+  odontogramaRegistros OdontogramaRegistro[]
+
+  @@unique([tenantId, numero])
+  @@map("prontuarios")
+}
+
+enum StatusAtendimento {
+  ABERTO
+  EM_ANDAMENTO
+  FINALIZADO
+  CANCELADO
+}
+
+/// Encontro clínico (consulta, exame, sessão odontológica, PA...).
+model Atendimento {
+  id                String            @id @default(uuid(7)) @db.Uuid
+  tenantId          String            @map("tenant_id") @db.Uuid
+  prontuarioId      String            @map("prontuario_id") @db.Uuid
+  pessoaId          String            @map("pessoa_id") @db.Uuid
+  beneficiarioId    String?           @map("beneficiario_id") @db.Uuid
+  estabelecimentoId String            @map("estabelecimento_id") @db.Uuid
+  profissionalId    String            @map("profissional_id") @db.Uuid
+  especialidadeId   String?           @map("especialidade_id") @db.Uuid
+  agendamentoId     String?           @unique @map("agendamento_id") @db.Uuid
+  senhaId           String?           @unique @map("senha_id") @db.Uuid
+  tipo              TipoAtendimento
+  status            StatusAtendimento @default(ABERTO)
+  cid10Principal    String?           @map("cid10_principal") @db.VarChar(6)
+  cid10Secundarios  String[]          @map("cid10_secundarios")
+  iniciadoEm        DateTime          @default(now()) @map("iniciado_em") @db.Timestamptz(6)
+  finalizadoEm      DateTime?         @map("finalizado_em") @db.Timestamptz(6)
+
+  tenant          Tenant            @relation(fields: [tenantId], references: [id])
+  prontuario      Prontuario        @relation(fields: [prontuarioId], references: [id])
+  pessoa          Pessoa            @relation(fields: [pessoaId], references: [id])
+  beneficiario    Beneficiario?     @relation(fields: [beneficiarioId], references: [id])
+  estabelecimento Estabelecimento   @relation(fields: [estabelecimentoId], references: [id])
+  profissional    Profissional      @relation(fields: [profissionalId], references: [id])
+  especialidade   Especialidade?    @relation(fields: [especialidadeId], references: [id])
+  agendamento     Agendamento?      @relation(fields: [agendamentoId], references: [id])
+  senha           SenhaAtendimento? @relation(fields: [senhaId], references: [id])
+
+  triagem              Triagem?
+  registros            RegistroClinico[]
+  prescricoes          Prescricao[]
+  atestados            Atestado[]
+  solicitacoesExame    SolicitacaoExame[]
+  documentos           Documento[]
+  odontogramaRegistros OdontogramaRegistro[]
+  procedimentosOdonto  ProcedimentoOdonto[]
+  imagensOdonto        ImagemOdonto[]
+  transacoes           TransacaoBeneficio[]
+  avaliacao            Avaliacao?
+
+  @@index([tenantId, pessoaId, iniciadoEm])
+  @@index([tenantId, profissionalId, iniciadoEm])
+  @@map("atendimentos")
+}
+
+enum TipoRegistroClinico {
+  ANAMNESE
+  EXAME_FISICO
+  EVOLUCAO
+  HIPOTESE_DIAGNOSTICA
+  CONDUTA
+  NOTA_ENFERMAGEM
+  ADENDO
+}
+
+/// Entrada do PEP. Conteúdo cifrado; após `assinadoEm` não pode ser alterado —
+/// uma retificação cria novo registro com `substituiId` apontando para o anterior.
+model RegistroClinico {
+  id                 String              @id @default(uuid(7)) @db.Uuid
+  tenantId           String              @map("tenant_id") @db.Uuid
+  prontuarioId       String              @map("prontuario_id") @db.Uuid
+  atendimentoId      String              @map("atendimento_id") @db.Uuid
+  profissionalId     String              @map("profissional_id") @db.Uuid
+  tipo               TipoRegistroClinico
+  conteudoCifrado    Bytes               @map("conteudo_cifrado")
+  substituiId        String?             @unique @map("substitui_id") @db.Uuid
+  assinadoEm         DateTime?           @map("assinado_em") @db.Timestamptz(6)
+  /// SHA-256 do conteúdo assinado + serial do certificado ICP-Brasil (padrão SBIS NGS2).
+  assinaturaHash     String?             @map("assinatura_hash") @db.Char(64)
+  certificadoSerial  String?             @map("certificado_serial")
+  criadoEm           DateTime            @default(now()) @map("criado_em") @db.Timestamptz(6)
+
+  tenant       Tenant           @relation(fields: [tenantId], references: [id])
+  prontuario   Prontuario       @relation(fields: [prontuarioId], references: [id])
+  atendimento  Atendimento      @relation(fields: [atendimentoId], references: [id])
+  profissional Profissional     @relation(fields: [profissionalId], references: [id])
+  substitui    RegistroClinico? @relation("Retificacao", fields: [substituiId], references: [id])
+  retificacao  RegistroClinico? @relation("Retificacao")
+
+  @@index([prontuarioId, criadoEm])
+  @@map("registros_clinicos")
+}
+
+enum StatusDocumentoClinico {
+  RASCUNHO
+  ASSINADO
+  CANCELADO
+}
+
+enum TipoReceita {
+  SIMPLES
+  /// Portaria SVS/MS 344/98 — receita de controle especial (2 vias).
+  CONTROLE_ESPECIAL
+  /// RDC 471/2021.
+  ANTIMICROBIANO
+}
+
+model Prescricao {
+  id              String                 @id @default(uuid(7)) @db.Uuid
+  tenantId        String                 @map("tenant_id") @db.Uuid
+  atendimentoId   String                 @map("atendimento_id") @db.Uuid
+  profissionalId  String                 @map("profissional_id") @db.Uuid
+  pessoaId        String                 @map("pessoa_id") @db.Uuid
+  tipo            TipoReceita            @default(SIMPLES)
+  status          StatusDocumentoClinico @default(RASCUNHO)
+  /// Código impresso/QR para a farmácia validar a autenticidade.
+  codigoValidacao String                 @unique @map("codigo_validacao")
+  validadeAte     DateTime?              @map("validade_ate") @db.Date
+  assinadoEm      DateTime?              @map("assinado_em") @db.Timestamptz(6)
+  assinaturaHash  String?                @map("assinatura_hash") @db.Char(64)
+  documentoId     String?                @unique @map("documento_id") @db.Uuid
+  criadoEm        DateTime               @default(now()) @map("criado_em") @db.Timestamptz(6)
+
+  tenant       Tenant           @relation(fields: [tenantId], references: [id])
+  atendimento  Atendimento      @relation(fields: [atendimentoId], references: [id])
+  profissional Profissional     @relation(fields: [profissionalId], references: [id])
+  pessoa       Pessoa           @relation(fields: [pessoaId], references: [id])
+  documento    Documento?       @relation("PrescricaoPdf", fields: [documentoId], references: [id])
+  itens        PrescricaoItem[]
+
+  @@index([tenantId, pessoaId, criadoEm])
+  @@map("prescricoes")
+}
+
+model PrescricaoItem {
+  id             String  @id @default(uuid(7)) @db.Uuid
+  tenantId       String  @map("tenant_id") @db.Uuid
+  prescricaoId   String  @map("prescricao_id") @db.Uuid
+  ordem          Int     @db.SmallInt
+  medicamento    String
+  principioAtivo String? @map("principio_ativo")
+  apresentacao   String?
+  codigoEan      String? @map("codigo_ean") @db.VarChar(14)
+  posologia      String
+  quantidade     String
+  via            String?
+  usoContinuo    Boolean @default(false) @map("uso_continuo")
+
+  tenant     Tenant     @relation(fields: [tenantId], references: [id])
+  prescricao Prescricao @relation(fields: [prescricaoId], references: [id], onDelete: Cascade)
+
+  @@index([prescricaoId])
+  @@map("prescricao_itens")
+}
+
+enum TipoAtestado {
+  AFASTAMENTO
+  COMPARECIMENTO
+  APTIDAO
+  ACOMPANHANTE
+}
+
+model Atestado {
+  id                 String                 @id @default(uuid(7)) @db.Uuid
+  tenantId           String                 @map("tenant_id") @db.Uuid
+  atendimentoId      String                 @map("atendimento_id") @db.Uuid
+  profissionalId     String                 @map("profissional_id") @db.Uuid
+  pessoaId           String                 @map("pessoa_id") @db.Uuid
+  tipo               TipoAtestado
+  diasAfastamento    Int?                   @map("dias_afastamento") @db.SmallInt
+  inicioAfastamento  DateTime?              @map("inicio_afastamento") @db.Date
+  /// CID só é impresso com autorização expressa do paciente (CFM 1.658/2002).
+  cid10              String?                @db.VarChar(6)
+  cidAutorizado      Boolean                @default(false) @map("cid_autorizado")
+  texto              String
+  status             StatusDocumentoClinico @default(RASCUNHO)
+  codigoValidacao    String                 @unique @map("codigo_validacao")
+  assinadoEm         DateTime?              @map("assinado_em") @db.Timestamptz(6)
+  assinaturaHash     String?                @map("assinatura_hash") @db.Char(64)
+  documentoId        String?                @unique @map("documento_id") @db.Uuid
+  criadoEm           DateTime               @default(now()) @map("criado_em") @db.Timestamptz(6)
+
+  tenant       Tenant       @relation(fields: [tenantId], references: [id])
+  atendimento  Atendimento  @relation(fields: [atendimentoId], references: [id])
+  profissional Profissional @relation(fields: [profissionalId], references: [id])
+  pessoa       Pessoa       @relation(fields: [pessoaId], references: [id])
+  documento    Documento?   @relation("AtestadoPdf", fields: [documentoId], references: [id])
+
+  @@map("atestados")
+}
+
+enum StatusSolicitacaoExame {
+  SOLICITADO
+  AGENDADO
+  REALIZADO
+  LAUDADO
+  CANCELADO
+}
+
+model SolicitacaoExame {
+  id                String                 @id @default(uuid(7)) @db.Uuid
+  tenantId          String                 @map("tenant_id") @db.Uuid
+  atendimentoId     String                 @map("atendimento_id") @db.Uuid
+  profissionalId    String                 @map("profissional_id") @db.Uuid
+  pessoaId          String                 @map("pessoa_id") @db.Uuid
+  indicacaoClinica  String                 @map("indicacao_clinica")
+  status            StatusSolicitacaoExame @default(SOLICITADO)
+  codigoValidacao   String                 @unique @map("codigo_validacao")
+  assinadoEm        DateTime?              @map("assinado_em") @db.Timestamptz(6)
+  assinaturaHash    String?                @map("assinatura_hash") @db.Char(64)
+  documentoId       String?                @unique @map("documento_id") @db.Uuid
+  criadoEm          DateTime               @default(now()) @map("criado_em") @db.Timestamptz(6)
+
+  tenant       Tenant                 @relation(fields: [tenantId], references: [id])
+  atendimento  Atendimento            @relation(fields: [atendimentoId], references: [id])
+  profissional Profissional           @relation(fields: [profissionalId], references: [id])
+  pessoa       Pessoa                 @relation(fields: [pessoaId], references: [id])
+  documento    Documento?             @relation("SolicitacaoExamePdf", fields: [documentoId], references: [id])
+  itens        SolicitacaoExameItem[]
+
+  @@map("solicitacoes_exame")
+}
+
+model SolicitacaoExameItem {
+  id             String  @id @default(uuid(7)) @db.Uuid
+  tenantId       String  @map("tenant_id") @db.Uuid
+  solicitacaoId  String  @map("solicitacao_id") @db.Uuid
+  itemCatalogoId String? @map("item_catalogo_id") @db.Uuid
+  codigoTuss     String? @map("codigo_tuss") @db.VarChar(10)
+  descricao      String
+  quantidade     Int     @default(1) @db.SmallInt
+  agendamentoId  String? @map("agendamento_id") @db.Uuid
+
+  tenant       Tenant           @relation(fields: [tenantId], references: [id])
+  solicitacao  SolicitacaoExame @relation(fields: [solicitacaoId], references: [id], onDelete: Cascade)
+  itemCatalogo ItemCatalogo?    @relation(fields: [itemCatalogoId], references: [id])
+  agendamento  Agendamento?     @relation(fields: [agendamentoId], references: [id])
+  resultado    ResultadoExame?
+
+  @@index([solicitacaoId])
+  @@map("solicitacao_exame_itens")
+}
+
+/// Resultado/laudo. Pode vir de pedido interno ou ser importado do sistema legado (LIS/RIS).
+model ResultadoExame {
+  id                     String    @id @default(uuid(7)) @db.Uuid
+  tenantId               String    @map("tenant_id") @db.Uuid
+  pessoaId               String    @map("pessoa_id") @db.Uuid
+  solicitacaoItemId      String?   @unique @map("solicitacao_item_id") @db.Uuid
+  estabelecimentoId      String    @map("estabelecimento_id") @db.Uuid
+  itemCatalogoId         String?   @map("item_catalogo_id") @db.Uuid
+  descricao              String
+  realizadoEm            DateTime  @map("realizado_em") @db.Timestamptz(6)
+  liberadoEm             DateTime? @map("liberado_em") @db.Timestamptz(6)
+  /// Alguns laudos só são liberados ao paciente após consulta de retorno.
+  liberadoPacienteEm     DateTime? @map("liberado_paciente_em") @db.Timestamptz(6)
+  laudoTexto             String?   @map("laudo_texto")
+  /// Analitos: [{"analito":"Hemoglobina","valor":13.2,"unidade":"g/dL","referencia":"12-16"}]
+  valoresEstruturados    Json?     @map("valores_estruturados")
+  documentoId            String?   @unique @map("documento_id") @db.Uuid
+  criadoEm               DateTime  @default(now()) @map("criado_em") @db.Timestamptz(6)
+
+  tenant          Tenant                @relation(fields: [tenantId], references: [id])
+  pessoa          Pessoa                @relation(fields: [pessoaId], references: [id])
+  solicitacaoItem SolicitacaoExameItem? @relation(fields: [solicitacaoItemId], references: [id])
+  estabelecimento Estabelecimento       @relation(fields: [estabelecimentoId], references: [id])
+  itemCatalogo    ItemCatalogo?         @relation(fields: [itemCatalogoId], references: [id])
+  documento       Documento?            @relation("ResultadoPdf", fields: [documentoId], references: [id])
+  conversasIa     ConversaIa[]
+
+  @@index([tenantId, pessoaId, realizadoEm])
+  @@map("resultados_exame")
+}
+
+enum TipoDocumento {
+  LAUDO
+  RECEITA
+  ATESTADO
+  PEDIDO_EXAME
+  IMAGEM_DIAGNOSTICA
+  RADIOGRAFIA
+  FOTO_CLINICA
+  CONTRATO
+  TERMO_CONSENTIMENTO
+  COMPROVANTE
+  OUTRO
+}
+
+/// Arquivo no Supabase Storage (bucket privado, caminho prefixado por tenant_id).
+model Documento {
+  id                   String        @id @default(uuid(7)) @db.Uuid
+  tenantId             String        @map("tenant_id") @db.Uuid
+  pessoaId             String?       @map("pessoa_id") @db.Uuid
+  atendimentoId        String?       @map("atendimento_id") @db.Uuid
+  tipo                 TipoDocumento
+  bucket               String
+  /// "{tenant_id}/{pessoa_id}/{uuid}.pdf"
+  caminho              String
+  nomeArquivo          String        @map("nome_arquivo")
+  mimeType             String        @map("mime_type")
+  tamanhoBytes         Int           @map("tamanho_bytes")
+  sha256               String        @db.Char(64)
+  enviadoPorUsuarioId  String?       @map("enviado_por_usuario_id") @db.Uuid
+  criadoEm             DateTime      @default(now()) @map("criado_em") @db.Timestamptz(6)
+  excluidoEm           DateTime?     @map("excluido_em") @db.Timestamptz(6)
+
+  tenant      Tenant       @relation(fields: [tenantId], references: [id])
+  pessoa      Pessoa?      @relation(fields: [pessoaId], references: [id])
+  atendimento Atendimento? @relation(fields: [atendimentoId], references: [id])
+
+  prescricao        Prescricao?            @relation("PrescricaoPdf")
+  atestado          Atestado?              @relation("AtestadoPdf")
+  solicitacaoExame  SolicitacaoExame?      @relation("SolicitacaoExamePdf")
+  resultadoExame    ResultadoExame?        @relation("ResultadoPdf")
+  imagemOdonto      ImagemOdonto?
+  planoTratamento   PlanoTratamentoOdonto?
+  comprovanteLote   LoteRepasse?
+
+  @@unique([bucket, caminho])
+  @@index([tenantId, pessoaId, tipo])
+  @@map("documentos")
+}

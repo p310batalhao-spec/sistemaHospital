@@ -1,0 +1,117 @@
+// =============================================================================
+// Módulo 7 — Pessoas (titulares, dependentes, pacientes) + consentimentos LGPD
+// Cada tenant é controlador dos próprios dados: a mesma pessoa física em dois
+// hospitais gera dois registros isolados.
+// =============================================================================
+
+enum Sexo {
+  FEMININO
+  MASCULINO
+  INTERSEXO
+  NAO_INFORMADO
+}
+
+enum FinalidadeConsentimento {
+  TERMOS_USO
+  POLITICA_PRIVACIDADE
+  TRATAMENTO_DADOS_SAUDE
+  COMPARTILHAMENTO_REDE_CREDENCIADA
+  COMUNICACAO_WHATSAPP
+  NOTIFICACAO_PUSH
+  MARKETING
+  USO_ASSISTENTE_IA
+}
+
+enum CanalRegistro {
+  APP
+  WEB
+  RECEPCAO
+  WHATSAPP
+  IMPORTACAO
+}
+
+model Pessoa {
+  id             String    @id @default(uuid(7)) @db.Uuid
+  tenantId       String    @map("tenant_id") @db.Uuid
+  nome           String
+  nomeSocial     String?   @map("nome_social")
+  /// Opcional: dependentes menores podem não ter CPF.
+  cpfHash        String?   @map("cpf_hash") @db.Char(64)
+  cpfCifrado     Bytes?    @map("cpf_cifrado")
+  rgCifrado      Bytes?    @map("rg_cifrado")
+  /// Cartão Nacional de Saúde.
+  cns            String?   @db.Char(15)
+  dataNascimento DateTime  @map("data_nascimento") @db.Date
+  sexo           Sexo      @default(NAO_INFORMADO)
+  nomeMae        String?   @map("nome_mae")
+  email          String?
+  celular        String?   @db.VarChar(20)
+  cep            String?   @db.Char(8)
+  logradouro     String?
+  numero         String?
+  complemento    String?
+  bairro         String?
+  cidade         String?
+  uf             String?   @db.Char(2)
+  latitude       Float?
+  longitude      Float?
+  fotoPath       String?   @map("foto_path")
+  falecidoEm     DateTime? @map("falecido_em") @db.Date
+  criadoEm       DateTime  @default(now()) @map("criado_em") @db.Timestamptz(6)
+  atualizadoEm   DateTime  @updatedAt @map("atualizado_em") @db.Timestamptz(6)
+  /// Pedido de eliminação (LGPD art. 18): dados cadastrais são anonimizados;
+  /// prontuário é retido por 20 anos (Lei 13.787/2018).
+  anonimizadoEm  DateTime? @map("anonimizado_em") @db.Timestamptz(6)
+
+  tenant Tenant  @relation(fields: [tenantId], references: [id])
+  membro Membro?
+
+  consentimentos          Consentimento[]
+  assinaturasTitular      Assinatura[]            @relation("AssinaturaTitular")
+  assinaturasResponsavel  Assinatura[]            @relation("AssinaturaResponsavel")
+  beneficiarios           Beneficiario[]
+  agendamentos            Agendamento[]
+  filasEspera             FilaEspera[]
+  senhas                  SenhaAtendimento[]
+  triagens                Triagem[]
+  prontuario              Prontuario?
+  atendimentos            Atendimento[]
+  prescricoes             Prescricao[]
+  atestados               Atestado[]
+  solicitacoesExame       SolicitacaoExame[]
+  resultadosExame         ResultadoExame[]
+  documentos              Documento[]
+  odontogramaRegistros    OdontogramaRegistro[]
+  planosTratamento        PlanoTratamentoOdonto[]
+  imagensOdonto           ImagemOdonto[]
+  transacoes              TransacaoBeneficio[]
+  notificacoes            Notificacao[]
+  avaliacoes              Avaliacao[]
+  conversasIa             ConversaIa[]
+
+  @@unique([tenantId, cpfHash])
+  @@index([tenantId, nome])
+  @@map("pessoas")
+}
+
+/// Registro versionado de consentimentos (base legal art. 11 LGPD para dados de saúde).
+model Consentimento {
+  id          String                  @id @default(uuid(7)) @db.Uuid
+  tenantId    String                  @map("tenant_id") @db.Uuid
+  pessoaId    String                  @map("pessoa_id") @db.Uuid
+  finalidade  FinalidadeConsentimento
+  concedido   Boolean
+  versaoTermo String                  @map("versao_termo")
+  canal       CanalRegistro
+  ip          String?                 @db.Inet
+  userAgent   String?                 @map("user_agent")
+  evidencia   Json?
+  registradoEm DateTime               @default(now()) @map("registrado_em") @db.Timestamptz(6)
+  revogadoEm  DateTime?               @map("revogado_em") @db.Timestamptz(6)
+
+  tenant Tenant @relation(fields: [tenantId], references: [id])
+  pessoa Pessoa @relation(fields: [pessoaId], references: [id])
+
+  @@index([tenantId, pessoaId, finalidade])
+  @@map("consentimentos")
+}
